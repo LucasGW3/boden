@@ -132,19 +132,19 @@ function get_allowed_units_for_user(int $uid): ?array {
 }
 
 /* Mapa de seções por role
-   +++ ADICIONADO: secProdAtingSafra (KPI geral) +++ */
+   (ATUALIZAÇÃO: adicionamos o secComercialOntem) */
 $SECTIONS_BY_ROLE = [
   'comercial' => ['secComercial','secComercialOntem'],
   'logistica' => ['secLogistica'],
   'qualidade' => ['secQPelada','secQDefeitos','secQUniform'],
-  'producao'  => ['secProdSacos','secProdCarreg','secProdDesc','secProdAprov','secProdAting','secProdAtingSafra'],
+  'producao'  => ['secProdSacos','secProdCarreg','secProdDesc','secProdAprov'],
   'fazenda'   => ['secFazCarreg','secFazDesc','secFazPessoas','secFazColhedora','secPie'],
 ];
 $ALL_SECTIONS = array_values(array_unique(array_merge(...array_values($SECTIONS_BY_ROLE))));
 
 $CAP_BY_SECTION = [
   'secComercial'        => ['view',  'dashboard_comercial'],
-  'secComercialOntem'   => ['view',  'dashboard_comercial'],
+  'secComercialOntem'   => ['view',  'dashboard_comercial'], // mesmo capability
   'secLogistica'        => ['view',  'dashboard_logistica'],
   'secQPelada'          => ['view',  'dashboard_qualidade'],
   'secQDefeitos'        => ['view',  'dashboard_qualidade'],
@@ -153,9 +153,6 @@ $CAP_BY_SECTION = [
   'secProdCarreg'       => ['view',  'dashboard_producao'],
   'secProdDesc'         => ['view',  'dashboard_producao'],
   'secProdAprov'        => ['view',  'dashboard_producao'],
-  'secProdAting'        => ['view',  'dashboard_producao'],
-  /* +++ NOVO +++ */
-  'secProdAtingSafra'   => ['view',  'dashboard_producao'],
   'secFazCarreg'        => ['view',  'dashboard_fazenda'],
   'secFazDesc'          => ['view',  'dashboard_fazenda'],
   'secFazPessoas'       => ['view',  'dashboard_fazenda'],
@@ -213,22 +210,19 @@ $from    = isset($_GET['from']) && $_GET['from'] !== '' ? new DateTime($_GET['fr
 $to      = isset($_GET['to'])   && $_GET['to']   !== '' ? new DateTime($_GET['to'])   : $today;
 $unidade = trim($_GET['unidade'] ?? '');
 
-if ($from > $to) { $tmp = $from; $from = $to; $to = $tmp; }
-
 /* Unidades permitidas (null = sem restrição) */
 $unitsAllowed     = get_allowed_units_for_user($uid);
 $restrictUnitsSQL = '';
 $paramsUnits      = [];
 
 if (is_array($unitsAllowed)) {
-  if (!empty($unitsAllowed)) {
+  if ($unitsAllowed) {
     $ph = [];
     foreach ($unitsAllowed as $i=>$uVal) { $ph[]=":ru$i"; $paramsUnits[":ru$i"]=$uVal; }
     $restrictUnitsSQL = " AND unidade IN (".implode(',', $ph).") ";
     if ($unidade !== '' && !in_array($unidade, $unitsAllowed, true)) $unidade = '';
   } else {
-    // Sem unidades atribuídas ⇒ por ora, sem restrição
-    $restrictUnitsSQL = "";
+    $restrictUnitsSQL = " AND 1=0 ";
   }
 }
 
@@ -364,7 +358,7 @@ $sql = "
     ) AS f_desc_dia
 
   FROM safra_entries
-  WHERE ref_date >= :from AND ref_date < DATE_ADD(:to, INTERVAL 1 DAY)
+  WHERE ref_date BETWEEN :from AND :to
     AND (:u1 = '' OR unidade = :u2)
   {$restrictUnitsSQL}
   ORDER BY ref_date ASC, id ASC
@@ -396,49 +390,25 @@ function hhmm_to_min($txt){
 function any_to_min($maybe){
   if ($maybe===null || $maybe==='') return null;
   if (is_numeric($maybe)) {
-    return (float)$maybe;
+    $v = (float)$maybe;
+    return ($v>=60) ? $v : $v*60;
   }
   return hhmm_to_min($maybe);
 }
 
-/* ===== Helper: converte dinheiro/numero em pt-BR para float ===== */
-function parse_money_br($v): ?float {
-  if ($v === null) return null;
-  if (is_float($v) || is_int($v)) return (float)$v;
-  if (is_string($v)) {
-    $s = trim($v);
-    if ($s === '') return null;
-    // remove R$, espaços (inclusive NBSP), e separadores de milhar
-    $s = str_replace(["R$", "r$", " "], "", $s);
-    $s = str_replace(["\xc2\xa0"], "", $s); // NBSP
-    $s = str_replace(["."], "", $s);        // milhar
-    $s = str_replace([","], ".", $s);       // decimal
-    // agora deve ser algo como 120.50 ou 120
-    if (preg_match('/^-?\d+(\.\d+)?$/', $s)) return (float)$s;
-    // fallback: tenta capturar primeiro padrão numérico dentro da string
-    if (preg_match('/-?\d+(?:[.,]\d+)?/', $v, $m)) {
-      $tmp = str_replace(["."], "", $m[0]);
-      $tmp = str_replace([","], ".", $tmp);
-      if (preg_match('/^-?\d+(\.\d+)?$/', $tmp)) return (float)$tmp;
-    }
-  }
-  return null;
-}
+$prodCarrByType = [];   // produção carregamento por tipo
+$prodDescByType = [];   // produção descarregamento por tipo
+$fazCarrByType  = [];   // fazenda carregamento por tipo
 
-$prodCarrByType = [];
-$prodDescByType = [];
-$fazCarrByType  = [];
-
-$logByType      = [];
-$allTypesLog    = [];
-
-$fazCarrRawSumPerDay = [];
-$fazCarrRawCntPerDay = [];
+// NOVO: BRUTOS FAZENDA CARREGAMENTO (para média correta por período e por filtro)
+$fazCarrRawSumPerDay = []; // soma dos minutos brutos por dia (todas as entradas, todos os tipos)
+$fazCarrRawCntPerDay = []; // contagem de entradas brutas por dia
 
 $allTypesProd      = [];
 $allTypesProdDesc  = [];
 $allTypesFaz       = [];
 
+/* Somente para outras métricas (não usadas na média entre tipos de produção) */
 foreach ($rows as $r) {
   $d = $r['ref_date'];
   if (!isset($byDay[$d])) $byDay[$d] = ['override'=>[], 'sum'=>[], 'avg'=>[]];
@@ -500,7 +470,7 @@ foreach ($rows as $r) {
     }
   }
 
-  // ===== Fazenda: CARREGAMENTO por tipo (valores brutos por tipo) + BRUTO global
+  // ===== Fazenda: CARREGAMENTO por tipo (valores brutos por tipo) + NOVO: bruto global para média
   $fazCandidates = [];
   if (!empty($payload['fazenda']['carregamento']))                 $fazCandidates = $payload['fazenda']['carregamento'];
   elseif (!empty($payload['fazenda']['carregamento_veiculos']))    $fazCandidates = $payload['fazenda']['carregamento_veiculos'];
@@ -516,52 +486,10 @@ foreach ($rows as $r) {
       $fazCarrByType[$d][$tipo]['sum'] += (float)$min;
       $fazCarrByType[$d][$tipo]['cnt'] += 1;
 
+      // BRUTO global (todas as entradas/tipos) para média correta
       if (!isset($fazCarrRawSumPerDay[$d])) { $fazCarrRawSumPerDay[$d]=0.0; $fazCarrRawCntPerDay[$d]=0; }
       $fazCarrRawSumPerDay[$d] += (float)$min;
       $fazCarrRawCntPerDay[$d] += 1;
-    }
-  }
-
-  // ===== Logística por tipo
-  $payload = $payload ?: [];
-  $logCandidates = [];
-  if (!empty($payload['logistica']['transporte_multi'])) {
-    $logCandidates = $payload['logistica']['transporte_multi'];
-  } elseif (!empty($payload['logistica']['transporte'])) {
-    $logCandidates = $payload['logistica']['transporte'];
-  } elseif (!empty($payload['logistica']['transporte_veiculos'])) {
-    $logCandidates = $payload['logistica']['transporte_veiculos'];
-  } elseif (!empty($payload['logistica']['tempo_transporte'])) {
-    $logCandidates = $payload['logistica']['tempo_transporte'];
-  } elseif (!empty($payload['logistica']['tempo_transporte_veiculos'])) {
-    $logCandidates = $payload['logistica']['tempo_transporte_veiculos'];
-  } elseif (!empty($payload['logistica']['tmt_por_veiculo'])) {
-    $logCandidates = $payload['logistica']['tmt_por_veiculo'];
-  }
-
-  if (is_array($logCandidates)) {
-    $isAssoc = array_keys($logCandidates) !== range(0, count($logCandidates)-1);
-    foreach ($logCandidates as $k => $it) {
-      $tipoRaw = trim((string)($it['tipo'] ?? $it['veiculo'] ?? ($isAssoc ? $k : '')));
-      $tipoNorm = mb_strtolower(str_replace('_',' ', $tipoRaw), 'UTF-8');
-
-      if ($tipoNorm === 'carreta' || $tipoNorm === 'ls' || $tipoNorm === 'carreta ls') {
-        $tipo = 'Carreta LS';
-      } elseif ($tipoNorm === 'truck' || $tipoNorm === 'toco' || $tipoNorm === '3/4') {
-        $tipo = 'Truck';
-      } else {
-        $tipo = ($tipoRaw !== '') ? $tipoRaw : null;
-      }
-
-      if ($tipo === null) continue;
-
-      $min = any_to_min($it['min'] ?? $it['tmt_min'] ?? $it['hhmm'] ?? $it['tmt_hhmm'] ?? null);
-      if ($min === null || $min <= 0) continue;
-
-      $allTypesLog[$tipo] = true;
-      if (!isset($logByType[$d][$tipo])) $logByType[$d][$tipo] = ['sum'=>0.0,'cnt'=>0];
-      $logByType[$d][$tipo]['sum'] += (float)$min;
-      $logByType[$d][$tipo]['cnt'] += 1;
     }
   }
 }
@@ -585,94 +513,13 @@ foreach ($byDay as $d => $bucket) {
   }
 }
 
-/* =======================
- * Atingimento da meta (%)
- * ======================= */
-
-/* 1. Meta default (?meta_sb=123) */
-$META_SACOS_DIA_DEFAULT = null;
-if (isset($_GET['meta_sb']) && $_GET['meta_sb'] !== '') {
-  $tmp = (float)$_GET['meta_sb'];
-  $META_SACOS_DIA_DEFAULT = ($tmp > 0) ? $tmp : null;
-}
-
-/* 2. Meta por dia (variações de caminho no JSON) */
-$sqlMeta = "
-  SELECT
-    ref_date,
-    CAST(
-      COALESCE(
-        NULLIF(CAST(JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.producao.meta_sacos_beneficiados_dia')) AS DECIMAL(10,3)), 0),
-        NULLIF(CAST(JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.producao.meta_sacos_dia')) AS DECIMAL(10,3)), 0),
-        NULLIF(CAST(JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.meta.sacos_beneficiados_dia')) AS DECIMAL(10,3)), 0),
-        NULLIF(CAST(JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.meta.meta_sacos_beneficiados_dia')) AS DECIMAL(10,3)), 0)
-      ) AS DECIMAL(10,3)
-    ) AS meta_sb
-  FROM safra_entries
-  WHERE ref_date >= :from AND ref_date < DATE_ADD(:to, INTERVAL 1 DAY)
-    AND (:u1 = '' OR unidade = :u2)
-  {$restrictUnitsSQL}
-  ORDER BY ref_date ASC, id ASC
-";
-$stMeta = pdo()->prepare($sqlMeta);
-$stMeta->execute($params ?: []);
-$metaByDay = [];
-while ($rw = $stMeta->fetch(PDO::FETCH_ASSOC)) {
-  $d = $rw['ref_date'];
-  $v = $rw['meta_sb'];
-  if ($v !== null && $v !== '' && is_numeric($v) && $v > 0) {
-    $metaByDay[$d] = (float)$v; // última meta do dia prevalece
-  }
-}
-
-/* 3. Série de % (diária) ++++ KPI SAFRA GERAL ++++ */
-$atingPct = [];          // % por dia (só onde real>0 e meta>0)
-$atingMetaMedia = null;  // média simples das % válidas
-$valsForAvg = [];
-
-$totalRealSafra = 0.0;
-$totalMetaSafra = 0.0;
-$diasComMeta    = 0;
-$diasComDados   = 0; // meta>0 & real>0
-$diasAtingidos  = 0;
-
-$metaSeries = []; // alinhada às datas para recálculo no client
-
-$i = 0;
-foreach (array_keys($byDay) as $d) {
-  $real = $series['p15_dia'][$i] ?? null; // sacos beneficiados (dia)
-  $meta = $metaByDay[$d] ?? $META_SACOS_DIA_DEFAULT;
-  $metaSeries[] = ($meta !== null && is_numeric($meta) && $meta > 0) ? (float)$meta : null;
-
-  if ($meta !== null && is_numeric($meta) && (float)$meta > 0) $diasComMeta++;
-
-  if (
-    $real !== null && is_numeric($real) && (float)$real > 0 &&
-    $meta !== null && is_numeric($meta) && (float)$meta > 0
-  ) {
-    $pct = round(((float)$real / (float)$meta) * 100, 2);
-    $atingPct[] = $pct;
-    $valsForAvg[] = $pct;
-
-    $totalRealSafra += (float)$real;
-    $totalMetaSafra += (float)$meta;
-    $diasComDados++;
-    if ($pct >= 100) $diasAtingidos++;
-  } else {
-    $atingPct[] = null;
-  }
-  $i++;
-}
-if ($valsForAvg) $atingMetaMedia = round(array_sum($valsForAvg) / count($valsForAvg), 2);
-$atingSafraPct = ($totalMetaSafra > 0) ? round(($totalRealSafra / $totalMetaSafra) * 100, 2) : null;
-
 /* =============================================================================
  * 7) Comercial — HOJE e ONTEM (média diária por SC)
  * ========================================================================== */
 $cStmt = pdo()->prepare("
   SELECT ref_date, payload_json
   FROM safra_entries
-  WHERE ref_date >= :from AND ref_date < DATE_ADD(:to, INTERVAL 1 DAY)
+  WHERE ref_date BETWEEN :from AND :to
     AND (:u1 = '' OR unidade = :u2)
   {$restrictUnitsSQL}
   ORDER BY ref_date ASC, id ASC
@@ -685,62 +532,37 @@ $cParams = array_merge([
 ], $paramsUnits);
 $cStmt->execute($cParams ?: []);
 
-/* mapas por dia */
-$comHojeByDate  = []; // [Y-m-d] => ['sum'=>..., 'cnt'=>...]
-$comOntemByDate = [];
+$comHojeByDate  = []; // média por dia (Preço Hoje / preco|preco_hoje)
+$comOntemByDate = []; // média por dia (Preço Ontem / preco_ontem)
 
 while ($row = $cStmt->fetch(PDO::FETCH_ASSOC)) {
   $d = $row['ref_date'];
   $payload = json_decode($row['payload_json'], true) ?: [];
-  $vendas  = $payload['comercial']['vendas'] ?? [];
-
+  $vendas = $payload['comercial']['vendas'] ?? [];
   if (!isset($comHojeByDate[$d]))  $comHojeByDate[$d]  = ['sum'=>0.0,'cnt'=>0];
   if (!isset($comOntemByDate[$d])) $comOntemByDate[$d] = ['sum'=>0.0,'cnt'=>0];
 
-  // normaliza $vendas (aceita array associativo ou lista)
-  if (is_array($vendas) && array_keys($vendas) !== range(0, count($vendas)-1)) {
-    // se vier objeto/dicionário, transforma em lista de itens
-    $vendas = array_values($vendas);
-  }
-
-  if (!is_array($vendas)) continue;
-
   foreach ($vendas as $v) {
-    if (!is_array($v)) continue;
-
-    // ----- valores de HOJE (qualquer uma das chaves abaixo)
-    $candidatosHoje = [
-      $v['preco']        ?? null,
-      $v['preco_hoje']   ?? null,
-      $v['preco_sc']     ?? null,
-      $v['preco_atual']  ?? null,
-    ];
-    foreach ($candidatosHoje as $raw) {
-      $num = parse_money_br($raw);
-      if ($num !== null && $num > 0) {
-        $comHojeByDate[$d]['sum'] += $num;
-        $comHojeByDate[$d]['cnt'] += 1;
-        break; // considera uma por item
-      }
+    // HOJE
+    $precoHojeSC = null;
+    if (array_key_exists('preco', $v) && $v['preco'] !== '' && $v['preco'] !== null) {
+      $precoHojeSC = (float)$v['preco'];
+    } elseif (array_key_exists('preco_hoje', $v) && $v['preco_hoje'] !== '' && $v['preco_hoje'] !== null) {
+      $precoHojeSC = (float)$v['preco_hoje'];
+    }
+    if ($precoHojeSC !== null) {
+      $comHojeByDate[$d]['sum'] += $precoHojeSC;
+      $comHojeByDate[$d]['cnt'] += 1;
     }
 
-    // ----- valores de ONTEM (qualquer uma das chaves abaixo)
-    $candidatosOntem = [
-      $v['preco_ontem']       ?? null,
-      $v['preco_realizado']   ?? null,
-      $v['preco_sc_ontem']    ?? null,
-    ];
-    foreach ($candidatosOntem as $raw) {
-      $num = parse_money_br($raw);
-      if ($num !== null && $num > 0) {
-        $comOntemByDate[$d]['sum'] += $num;
-        $comOntemByDate[$d]['cnt'] += 1;
-        break;
-      }
+    // ONTEM
+    if (array_key_exists('preco_ontem', $v) && $v['preco_ontem'] !== '' && $v['preco_ontem'] !== null) {
+      $precoOntemSC = (float)$v['preco_ontem'];
+      $comOntemByDate[$d]['sum'] += $precoOntemSC;
+      $comOntemByDate[$d]['cnt'] += 1;
     }
   }
 }
-
 ksort($comHojeByDate);
 ksort($comOntemByDate);
 
@@ -772,165 +594,6 @@ $mediaPeriodoSC_O = $totalCntO>0 ? round($totalSumO/$totalCntO, 3) : null;
 $labelsCISO_H = array_keys($comHojeByDate);
 $labelsCISO_O = array_keys($comOntemByDate);
 
-/* === Comercial por Variedade via VIEWS (Hoje/Ontem) === */
-
-/* 1) Variedades disponíveis no período/unidade */
-$sqlVar = "
-  SELECT DISTINCT vp.variedade
-  FROM v_precos_comercial_var_ponderado vp
-  WHERE vp.ref_date BETWEEN :from AND :to
-    AND (
-      :u1 = '' OR EXISTS (
-        SELECT 1
-          FROM v_comercial_vendas cv
-         WHERE cv.ref_date  = vp.ref_date
-           AND cv.variedade = vp.variedade
-           AND cv.unidade   = :u2
-      )
-    )
-  ORDER BY vp.variedade
-";
-$stVar = pdo()->prepare($sqlVar);
-$stVar->execute([
-  ':from' => $from->format('Y-m-d'),
-  ':to'   => $to->format('Y-m-d'),
-  ':u1'   => $unidade,
-  ':u2'   => $unidade,
-]);
-$comVarNames = $stVar->fetchAll(PDO::FETCH_COLUMN) ?: [];
-
-/* 2) Índices por data (já vieram dos blocos HOJE/ONTEM) */
-$idxByDateH = array_flip($labelsCISO_H); // HOJE
-$idxByDateO = array_flip($labelsCISO_O); // ONTEM
-
-/* 3) Pesos (SC) por dia e variedade — romaneio */
-$sqlW = "
-  SELECT
-    p.ref_date,
-    p.variedade,
-    SUM(p.peso_sc) AS sc
-  FROM v_romaneio_var_caixa_peso p
-  JOIN v_comercial_vendas cv
-    ON  cv.ref_date  = p.ref_date
-    AND cv.variedade = p.variedade
-    AND cv.caixa     = p.caixa
-  WHERE p.ref_date >= :from AND p.ref_date < DATE_ADD(:to, INTERVAL 1 DAY)
-    AND (:u1 = '' OR cv.unidade = :u2)
-  GROUP BY p.ref_date, p.variedade
-";
-$stW = pdo()->prepare($sqlW);
-$stW->execute([
-  ':from' => $from->format('Y-m-d'),
-  ':to'   => $to->format('Y-m-d'),
-  ':u1'   => $unidade,
-  ':u2'   => $unidade,
-]);
-
-/* 4) Preços HOJE (média por dia/variedade) */
-$sqlPH = "
-  SELECT vp.ref_date, vp.variedade, vp.preco_ponderado_sc AS preco
-  FROM v_precos_comercial_var_ponderado vp
-  WHERE vp.ref_date BETWEEN :from AND :to
-    AND vp.preco_ponderado_sc IS NOT NULL
-    AND (
-      :u1 = '' OR EXISTS (
-        SELECT 1
-          FROM v_comercial_vendas cv
-         WHERE cv.ref_date  = vp.ref_date
-           AND cv.variedade = vp.variedade
-           AND cv.unidade   = :u2
-      )
-    )
-";
-$stPH = pdo()->prepare($sqlPH);
-$stPH->execute([
-  ':from' => $from->format('Y-m-d'),
-  ':to'   => $to->format('Y-m-d'),
-  ':u1'   => $unidade,
-  ':u2'   => $unidade,
-]);
-
-/* 5) Preços ONTEM (ponderado por caixa, inlinee) */
-$sqlPO = "
-  SELECT
-    p.ref_date,
-    p.variedade,
-    CASE WHEN SUM(p.peso_sc) > 0
-         THEN SUM(p.peso_sc * cv.preco_ontem) / SUM(p.peso_sc)
-         ELSE NULL
-    END AS preco
-  FROM v_romaneio_var_caixa_peso p
-  JOIN v_comercial_vendas cv
-    ON  cv.ref_date  = p.ref_date
-    AND cv.variedade = p.variedade
-    AND cv.caixa     = p.caixa
-  WHERE p.ref_date >= :from AND p.ref_date < DATE_ADD(:to, INTERVAL 1 DAY)
-    AND (:u1 = '' OR cv.unidade = :u2)
-    AND cv.preco_ontem IS NOT NULL
-  GROUP BY p.ref_date, p.variedade
-";
-$stPO = pdo()->prepare($sqlPO);
-$stPO->execute([
-  ':from' => $from->format('Y-m-d'),
-  ':to'   => $to->format('Y-m-d'),
-  ':u1'   => $unidade,
-  ':u2'   => $unidade,
-]);
-
-/* 6) Inicializa arrays alinhados às datas HOJE/ONTEM */
-$lenH = count($labelsCISO_H);
-$lenO = count($labelsCISO_O);
-$comHojeVarPrice  = [];
-$comHojeVarQty    = [];
-$comOntemVarPrice = [];
-$comOntemVarQty   = [];
-
-foreach ($comVarNames as $vn) {
-  $comHojeVarPrice[$vn]  = array_fill(0, $lenH, null);
-  $comHojeVarQty[$vn]    = array_fill(0, $lenH, 0.0);
-  $comOntemVarPrice[$vn] = array_fill(0, $lenO, null);
-  $comOntemVarQty[$vn]   = array_fill(0, $lenO, 0.0);
-}
-
-/* 7) Preenche preços HOJE */
-while ($r = $stPH->fetch(PDO::FETCH_ASSOC)) {
-  $d  = $r['ref_date'];
-  $vn = (string)$r['variedade'];
-  $pr = is_numeric($r['preco']) ? (float)$r['preco'] : null;
-  if ($pr === null || !isset($idxByDateH[$d]) || !isset($comHojeVarPrice[$vn])) continue;
-  $i = $idxByDateH[$d];
-  $comHojeVarPrice[$vn][$i] = $pr;
-}
-
-/* 8) Preenche preços ONTEM */
-while ($r = $stPO->fetch(PDO::FETCH_ASSOC)) {
-  $d  = $r['ref_date'];
-  $vn = (string)$r['variedade'];
-  $pr = is_numeric($r['preco']) ? (float)$r['preco'] : null;
-  if ($pr === null || !isset($idxByDateO[$d]) || !isset($comOntemVarPrice[$vn])) continue;
-  $i = $idxByDateO[$d];
-  $comOntemVarPrice[$vn][$i] = $pr;
-}
-
-/* 9) Preenche PESOS (SC) — valem para Hoje e Ontem (mesmo dia) */
-while ($r = $stW->fetch(PDO::FETCH_ASSOC)) {
-  $d  = $r['ref_date'];
-  $vn = (string)$r['variedade'];
-  $sc = is_numeric($r['sc']) ? (float)$r['sc'] : 0.0;
-  if ($sc <= 0) continue;
-
-  if (isset($idxByDateH[$d]) && isset($comHojeVarQty[$vn])) {
-    $comHojeVarQty[$vn][$idxByDateH[$d]] += $sc;
-  }
-  if (isset($idxByDateO[$d]) && isset($comOntemVarQty[$vn])) {
-    $comOntemVarQty[$vn][$idxByDateO[$d]] += $sc;
-  }
-}
-
-/* 10) Ordena nomes de variedade como antes */
-natcasesort($comVarNames);
-$comVarNames = array_values($comVarNames);
-
 /* =============================================================================
  * 8) F18 — Big bag por Variedade (LINHAS por dia)
  * ========================================================================== */
@@ -942,10 +605,11 @@ function payload_bigbag_var($payload) {
       ?? null;
 }
 
+/* Busca os registros do intervalo (ordem ASC para alinhar com $labels) */
 $sqlF18 = "
   SELECT ref_date, payload_json
   FROM safra_entries
-  WHERE ref_date >= :from AND ref_date < DATE_ADD(:to, INTERVAL 1 DAY)
+  WHERE ref_date BETWEEN :from AND :to
     AND (:u1 = '' OR unidade = :u2)
   {$restrictUnitsSQL}
     AND COALESCE(
@@ -960,8 +624,9 @@ $stF18 = pdo()->prepare($sqlF18);
 $stF18->execute($params ?: []);
 $f18Rows = $stF18->fetchAll(PDO::FETCH_ASSOC);
 
-$f18ByDay = [];
-$f18VarSet = [];
+/* Mapa por dia => variedade => valor (>0) */
+$f18ByDay = [];       // [date][var] = soma do dia
+$f18VarSet = [];      // conjunto de variedades encontradas
 foreach ($f18Rows as $row) {
   $d = $row['ref_date'];
   $payload = json_decode($row['payload_json'] ?? 'null', true) ?: [];
@@ -969,6 +634,7 @@ foreach ($f18Rows as $row) {
   if (!is_array($data)) continue;
 
   if (!isset($f18ByDay[$d])) $f18ByDay[$d] = [];
+  // Aceita formatos array OU objeto
   if (array_keys($data) === range(0, count($data)-1)) {
     foreach ($data as $it) {
       $nm = trim((string)($it['variedade'] ?? $it['nome'] ?? $it['tipo'] ?? ''));
@@ -992,13 +658,15 @@ foreach ($f18Rows as $row) {
   }
 }
 
+/* Alinha as séries às datas ISO já usadas pelo dashboard */
 ksort($f18ByDay);
-$labelsISO  = array_keys($byDay);
+$labelsISO  = array_keys($byDay); // já definido adiante, mas precisamos aqui também para alinhar
 $f18VarNames = array_keys($f18VarSet);
 natcasesort($f18VarNames);
 $f18VarNames = array_values($f18VarNames);
 
-$f18SeriesByVar = [];
+/* Inicializa séries com nulls e preenche por data */
+$f18SeriesByVar = [];           // assoc: varName => [ ..valores por labelISO.. ]
 foreach ($f18VarNames as $vn)   $f18SeriesByVar[$vn] = [];
 
 $f18TotalSeries = [];
@@ -1013,64 +681,52 @@ foreach ($labelsISO as $d) {
   $f18TotalSeries[] = $has ? round($tot, 3) : null;
 }
 
-/* Média do período baseada na série TOTAL (ignora null/0) */
-$avgOf = function($arr){
-  $sum = 0; $cnt = 0;
-  foreach ($arr as $v) {
-    if ($v === null) continue;
-    if (!is_numeric($v)) continue;
-    $num = (float)$v;
-    if ($num == 0.0) continue;
-    $sum += $num; $cnt++;
-  }
-  return $cnt>0 ? round($sum/$cnt, 3) : null;
-};
-$f18TotalMean = $avgOf($f18TotalSeries);
+/* Média do período baseada na série TOTAL (não nos dias nulos) */
+$sum=0; $cnt=0;
+foreach ($f18TotalSeries as $v) { if ($v !== null) { $sum += $v; $cnt++; } }
+$f18TotalMean = $cnt>0 ? round($sum/$cnt, 3) : null;
 
 /* =============================================================================
  * 9) Métricas resumo (gerais)
  * ========================================================================== */
-$mediaLogLegacy   = $avgOf($series['l5']);
+$avgOf = function($arr){ $sum=0; $cnt=0; foreach ($arr as $v){ if($v!==null){$sum+=$v;$cnt++;}} return $cnt>0?round($sum/$cnt,3):null; };
+$mediaLog   = $avgOf($series['l5']);
 $mediaPelada= $avgOf($series['q6_dia']);
 $mediaDefeitos=$avgOf($series['q7_dia']);
 $mediaUniform =$avgOf($series['q8_dia']);
-$mediaCarrLegacy  = $avgOf($series['f_carr_dia']);
+$mediaCarrLegacy  = $avgOf($series['f_carr_dia']); // legado (não usado no gráfico da fazenda)
 $mediaDesc  = $avgOf($series['f_desc_dia']);
 $mediaAprov = $avgOf($series['p_aprov_dia']);
 
+/* NOVO: Média correta da Fazenda Carregamento com BRUTOS (todas as entradas/tipos) */
 ksort($fazCarrRawSumPerDay);
 ksort($fazCarrRawCntPerDay);
-$labelsISO  = array_keys($byDay);
-$labelsRawF = array_keys($fazCarrRawSumPerDay);
+$labelsISO  = array_keys($byDay);               // datas ISO das séries gerais
+$labelsRawF = array_keys($fazCarrRawSumPerDay); // podem coincidir, mas mantemos independentes
 
 $rawGlobalSum = array_sum($fazCarrRawSumPerDay);
 $rawGlobalCnt = array_sum($fazCarrRawCntPerDay);
 $mediaFazCarrRaw = ($rawGlobalCnt>0) ? round($rawGlobalSum/$rawGlobalCnt, 3) : null;
 
 /* =============================================================================
- * 10) Séries por tipo (produção, fazenda e logística)
+ * 10) Séries por tipo (produção e fazenda)
  * ========================================================================== */
 $typesProd = array_keys($allTypesProd); sort($typesProd, SORT_NATURAL|SORT_FLAG_CASE);
 $typesProdDesc = array_keys($allTypesProdDesc); sort($typesProdDesc, SORT_NATURAL|SORT_FLAG_CASE);
 $typesFaz  = array_keys($allTypesFaz ); sort($typesFaz , SORT_NATURAL|SORT_FLAG_CASE);
-$typesLog = array_keys($allTypesLog);
-$typesLog = array_values(array_filter($typesLog, function($t){
-  $n = mb_strtolower($t, 'UTF-8');
-  return !in_array($n, ['veiculo','veículos','veiculos'], true);
-}));
-sort($typesLog, SORT_NATURAL|SORT_FLAG_CASE);
 
-$seriesProdCarrTipos = []; $seriesProdDescTipos = []; $seriesFazCarrTipos  = []; $seriesLogTipos = [];
+$seriesProdCarrTipos = []; $seriesProdDescTipos = []; $seriesFazCarrTipos  = [];
 foreach ($typesProd as $t)      $seriesProdCarrTipos[$t]  = [];
 foreach ($typesProdDesc as $t)  $seriesProdDescTipos[$t]  = [];
 foreach ($typesFaz as $t)       $seriesFazCarrTipos[$t]   = [];
-foreach ($typesLog as $t)       $seriesLogTipos[$t]       = [];
 
+/* Preenche séries por dia (média do que entrou no dia para aquele tipo)
+   e calcula a “Média diária (entre tipos)” para cada dia, separando carregamento e descarregamento */
 $prodCarrDailyMeanSeries = [];
 $prodDescDailyMeanSeries = [];
-$logDailyMeanSeries      = [];
 
 foreach (array_keys($byDay) as $d) {
+  // carregamento por tipo
   $carrValsForMean = [];
   foreach ($typesProd as $t) {
     $val = (isset($prodCarrByType[$d][$t]) && $prodCarrByType[$d][$t]['cnt']>0)
@@ -1081,6 +737,7 @@ foreach (array_keys($byDay) as $d) {
   }
   $prodCarrDailyMeanSeries[] = count($carrValsForMean) ? round(array_sum($carrValsForMean)/count($carrValsForMean), 3) : null;
 
+  // descarregamento por tipo
   $descValsForMean = [];
   foreach ($typesProdDesc as $t) {
     $val = (isset($prodDescByType[$d][$t]) && $prodDescByType[$d][$t]['cnt']>0)
@@ -1091,59 +748,29 @@ foreach (array_keys($byDay) as $d) {
   }
   $prodDescDailyMeanSeries[] = count($descValsForMean) ? round(array_sum($descValsForMean)/count($descValsForMean), 3) : null;
 
+  // carregamento por tipo (mantido por tipo no gráfico)
   foreach ($typesFaz as $t) {
     $seriesFazCarrTipos[$t][] = (isset($fazCarrByType[$d][$t]) && $fazCarrByType[$d][$t]['cnt']>0)
-      ? round($fazCarrByType[$d][$t]['sum'], 3) : null;
+      ? round($fazCarrByType[$d][$t]['sum'] / $fazCarrByType[$d][$t]['cnt'], 3) : null;
   }
-
-  $logValsForMean = [];
-  foreach ($typesLog as $t) {
-    $val = (isset($logByType[$d][$t]) && $logByType[$d][$t]['cnt']>0)
-      ? round($logByType[$d][$t]['sum'] / $logByType[$d][$t]['cnt'], 3)
-      : null;
-    $seriesLogTipos[$t][] = $val;
-    if ($val !== null) $logValsForMean[] = $val;
-  }
-  $logDailyMeanSeries[] = count($logValsForMean) ? round(array_sum($logValsForMean)/count($logValsForMean), 3) : null;
 }
 
-/* Médias do período (min) */
-$avgOf = $avgOf;
-$mediaTMC_period = $avgOf($prodCarrDailyMeanSeries);
-$mediaTMD_period = $avgOf($prodDescDailyMeanSeries);
-$mediaLog_all    = $avgOf($logDailyMeanSeries);
+/* Médias do período para exibir no meta-texto dos gráficos de produção */
+$mediaTMC_period = $avgOf($prodCarrDailyMeanSeries); // carregamento (entre tipos)
+$mediaTMD_period = $avgOf($prodDescDailyMeanSeries); // descarregamento (entre tipos)
 
-/* LOGÍSTICA (2 veículos + média) */
-$desiredLogTypes = ['Carreta LS', 'Truck'];
-$typesLogSel = array_values(array_intersect($desiredLogTypes, $typesLog));
-if (!$typesLogSel) {
-  $typesLogSel = array_slice($typesLog, 0, min(2, count($typesLog)));
-}
-
-$seriesLogTiposSel = [];
-foreach ($typesLogSel as $t) { $seriesLogTiposSel[$t] = $seriesLogTipos[$t] ?? []; }
-
-$logDailyMeanSel = [];
-$lenLabels = count($labels);
-for ($i=0; $i<$lenLabels; $i++) {
-  $vals = [];
-  foreach ($typesLogSel as $t) {
-    $v = $seriesLogTiposSel[$t][$i] ?? null;
-    if ($v !== null) $vals[] = (float)$v;
-  }
-  $logDailyMeanSel[] = (count($vals) === 2) ? round(($vals[0]+$vals[1])/2, 3) : (count($vals) ? round(array_sum($vals)/count($vals), 3) : null);
-}
-$mediaLogSel = $avgOf($logDailyMeanSel);
-
+/* Arrays alinhados aos labels gerais para os BRUTOS de fazenda (sum/cnt por dia) */
 $fazCarrRawSumArr = [];
 $fazCarrRawCntArr = [];
 foreach ($labelsISO as $d) {
-  $fazCarrRawSumArr[] = isset($fazCarrRawSumPerDay[$d]) ? round((float)$fazCarrRawSumPerDay[$d], 3) : null;
+  $fazCarrRawSumArr[] = isset($fazCarrRawSumPerDay[$d]) ? round($fazCarrRawSumPerDay[$d], 3) : null;
   $fazCarrRawCntArr[] = isset($fazCarrRawCntPerDay[$d]) ? (int)$fazCarrRawCntPerDay[$d] : null;
 }
 
-$labelsCISO = array_keys($comHojeByDate);
+/* Datas ISO para o client re-filtar sem reload */
+$labelsCISO = array_keys($comHojeByDate); // mantida por compat
 
+/* NOVO: médias para Pessoas e Colhedora separadas (usadas nas linhas de média e meta) */
 $mediaF17 = $avgOf($series['f17_dia']);
 $mediaF19 = $avgOf($series['f19_dia']);
 
@@ -1154,7 +781,7 @@ $mediaF19 = $avgOf($series['f19_dia']);
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Boden - Dashboard Geral</title>
-  <link href="https://fonts.googleapis.com/css2?family=Cabin:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Cabin:ital,wght@0,400..700;1,400..700&family=Josefin+Sans:ital,wght@0,100..700;1,100..700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/png" sizes="96x96" href="./favicon-96x96.png">
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -1308,47 +935,25 @@ $mediaF19 = $avgOf($series['f19_dia']);
 
     <!-- GRID DE GRÁFICOS -->
     <div id="gridCharts">
-
-      <?php if (in_array('secProdAtingSafra', $allowedSections, true)): ?>
-      <!-- +++ NOVO: KPI GERAL SAFRA +++ -->
-      <section id="secProdAtingSafra" class="card rounded-xl2 bg-brand-surface p-5">
-        <h2 class="font-semibold mb-1">Safra • Atingimento Geral da Meta</h2>
-        <div class="flex items-center gap-6 flex-wrap">
-          <div>
-            <div id="kp-ating-safra" class="text-4xl font-extrabold">—</div>
-            <div id="kp-ating-desc" class="text-sm text-brand-muted">—</div>
-          </div>
-          <div class="relative w-24 h-24 sm:w-28 sm:h-28 md:w-32 md:h-32">
-          <canvas id="chartGaugeSafra"></canvas>
-        </div>
-        </div>
-        <div id="kp-ating-extra" class="mt-3 text-sm text-brand-muted">—</div>
-      </section>
-      <?php endif; ?>
-
       <?php if (in_array('secComercial', $allowedSections, true)): ?>
       <section id="secComercial" class="card rounded-xl2 bg-brand-surface p-5">
-        <h2 class="font-semibold mb-1">Comercial • Preço por SC • Hoje (R$)</h2>
-        <p id="com-meta" class="text-xs text-brand-muted mb-2">—</p>
-        <!-- (NOVO) Filtro dentro do card -->
-        <div id="comercialVarPicker" class="mb-3 flex flex-wrap gap-2 text-xs"></div>
+        <h2 class="font-semibold mb-1">Comercial • Preço por SC (R$)</h2>
+        <p id="com-meta" class="text-xs text-brand-muted mb-3">—</p>
         <canvas id="chartComercialMedia"></canvas>
       </section>
       <?php endif; ?>
 
       <?php if (in_array('secComercialOntem', $allowedSections, true)): ?>
       <section id="secComercialOntem" class="card rounded-xl2 bg-brand-surface p-5">
-        <h2 class="font-semibold mb-1">Comercial • Preço por SC • Realizado (R$)</h2>
-        <p id="com-ontem-meta" class="text-xs text-brand-muted mb-2">—</p>
-        <!-- (NOVO) Filtro dentro do card -->
-        <div id="comercialOntemVarPicker" class="mb-3 flex flex-wrap gap-2 text-xs"></div>
+        <h2 class="font-semibold mb-1">Comercial • Preço por SC (Realizado)</h2>
+        <p id="com-ontem-meta" class="text-xs text-brand-muted mb-3">—</p>
         <canvas id="chartComercialOntem"></canvas>
       </section>
       <?php endif; ?>
 
       <?php if (in_array('secLogistica', $allowedSections, true)): ?>
       <section id="secLogistica" class="card rounded-xl2 bg-brand-surface p-5">
-        <h2 class="font-semibold mb-1">Logística • Tempo de transporte (h)</h2>
+        <h2 class="font-semibold mb-1">Logística • Tempo de transporte (min)</h2>
         <p id="log-meta" class="text-xs text-brand-muted mb-3">—</p>
         <canvas id="chartLogistica"></canvas>
       </section>
@@ -1380,22 +985,14 @@ $mediaF19 = $avgOf($series['f19_dia']);
 
       <?php if (in_array('secProdSacos', $allowedSections, true)): ?>
       <section id="secProdSacos" class="card rounded-xl2 bg-brand-surface p-5">
-        <h2 class="font-semibold mb-3">Produção • Sacos (total) e por colaborador</h2>
+        <h2 class="font-semibold mb-3">Sacos (total) e por colaborador</h2>
         <canvas id="chartProdSacos"></canvas>
-      </section>
-      <?php endif; ?>
-
-      <?php if (in_array('secProdAting', $allowedSections, true)): ?>
-      <section id="secProdAting" class="card rounded-xl2 bg-brand-surface p-5">
-        <h2 class="font-semibold mb-1">Produção • Atingimento da Meta (%) × Sacos/Dia</h2>
-        <p id="prod-ating-meta" class="text-xs text-brand-muted mb-3">—</p>
-        <canvas id="chartProdAting"></canvas>
       </section>
       <?php endif; ?>
 
       <?php if (in_array('secProdCarreg', $allowedSections, true)): ?>
       <section id="secProdCarreg" class="card rounded-xl2 bg-brand-surface p-5">
-        <h2 class="font-semibold mb-1">Produção • Carregamento (h)</h2>
+        <h2 class="font-semibold mb-1">Carregamento (min)</h2>
         <p id="prod-carr-meta" class="text-xs text-brand-muted mb-3">—</p>
         <canvas id="chartProdCarreg"></canvas>
       </section>
@@ -1403,7 +1000,7 @@ $mediaF19 = $avgOf($series['f19_dia']);
 
       <?php if (in_array('secProdDesc', $allowedSections, true)): ?>
       <section id="secProdDesc" class="card rounded-xl2 bg-brand-surface p-5">
-        <h2 class="font-semibold mb-1">Produção • Descarregamento (h)</h2>
+        <h2 class="font-semibold mb-1">Descarregamento (min)</h2>
         <p id="prod-desc-meta" class="text-xs text-brand-muted mb-3">—</p>
         <canvas id="chartProdDesc"></canvas>
       </section>
@@ -1411,7 +1008,7 @@ $mediaF19 = $avgOf($series['f19_dia']);
 
       <?php if (in_array('secProdAprov', $allowedSections, true)): ?>
       <section id="secProdAprov" class="card rounded-xl2 bg-brand-surface p-5">
-        <h2 class="font-semibold mb-1">Produção • Aproveitamento (%)</h2>
+        <h2 class="font-semibold mb-1">Aproveitamento (%)</h2>
         <p id="prod-aprov-meta" class="text-xs text-brand-muted mb-3">—</p>
         <canvas id="chartProdAprov"></canvas>
       </section>
@@ -1419,7 +1016,7 @@ $mediaF19 = $avgOf($series['f19_dia']);
 
       <?php if (in_array('secFazCarreg', $allowedSections, true)): ?>
       <section id="secFazCarreg" class="card rounded-xl2 bg-brand-surface p-5">
-        <h2 class="font-semibold mb-1">Fazenda • Carregamento (h)</h2>
+        <h2 class="font-semibold mb-1">Carregamento (min)</h2>
         <p id="faz-carreg-meta" class="text-xs text-brand-muted mb-3">—</p>
         <canvas id="chartFazendaCarreg"></canvas>
       </section>
@@ -1427,7 +1024,7 @@ $mediaF19 = $avgOf($series['f19_dia']);
 
       <?php if (in_array('secFazPessoas', $allowedSections, true)): ?>
       <section id="secFazPessoas" class="card rounded-xl2 bg-brand-surface p-5">
-        <h2 class="font-semibold mb-1">Fazenda • Pessoas no Campo</h2>
+        <h2 class="font-semibold mb-1">Pessoas no Campo</h2>
         <p id="faz-pessoas-meta" class="text-xs text-brand-muted mb-3">—</p>
         <canvas id="chartFazendaPessoas"></canvas>
       </section>
@@ -1435,7 +1032,7 @@ $mediaF19 = $avgOf($series['f19_dia']);
 
       <?php if (in_array('secFazColhedora', $allowedSections, true)): ?>
       <section id="secFazColhedora" class="card rounded-xl2 bg-brand-surface p-5">
-        <h2 class="font-semibold mb-1">Fazenda • Colhedora</h2>
+        <h2 class="font-semibold mb-1">Colhedora</h2>
         <p id="faz-colhedora-meta" class="text-xs text-brand-muted mb-3">—</p>
         <canvas id="chartFazendaColhedora"></canvas>
       </section>
@@ -1443,7 +1040,7 @@ $mediaF19 = $avgOf($series['f19_dia']);
 
       <?php if (in_array('secPie', $allowedSections, true)): ?>
       <section id="secPie" class="card rounded-xl2 bg-brand-surface p-5">
-        <h2 class="font-semibold mb-3">Fazenda • Big bag por Variedade</h2>
+        <h2 class="font-semibold mb-3">Big bag por Variedade</h2>
         <canvas id="chartPie"></canvas>
       </section>
       <?php endif; ?>
@@ -1508,41 +1105,6 @@ $mediaF19 = $avgOf($series['f19_dia']);
   </div>
 
 <script>
-
-  // === Helpers globais (HOISTED) ===
-// Defina só uma vez no arquivo, no topo do <script>
-window.EXCLUDE_VARS = new Set(['Refugo','Resíduo','Residuo','Refugo/Resíduo']);
-
-function filterVarList(names){
-  names = names || [];
-  const out = [];
-  for (let i = 0; i < names.length; i++){
-    const v = (names[i] || '').trim();
-    if (!window.EXCLUDE_VARS.has(v)) out.push(v);
-  }
-  return out;
-}
-
-function dailyRevenue(priceMap, qtyMap, varSel, len){
-  const out = new Array(len).fill(null);
-  for (let i = 0; i < len; i++){
-    let sum = 0, any = false;
-    for (let k = 0; k < varSel.length; k++){
-      const v = varSel[k];
-      const pArr = (priceMap[v] || []);
-      const qArr = (qtyMap[v]   || []);
-      const p = pArr[i];
-      const q = qArr[i];
-      if (p != null && q != null && !Number.isNaN(p) && !Number.isNaN(q) && Number(q) > 0){
-        sum += Number(p) * Number(q);
-        any = true;
-      }
-    }
-    out[i] = any ? sum : null;
-  }
-  return out;
-}
-
   const THEME = { g1:'#9DBF21', g2:'#56A632', g3:'#63AA35', soft:'#cfe87a', red:'#EA0004', yellow:'#FFC107', text:'#1e1e1e' };
 
   document.getElementById('btnFull')?.addEventListener('click',()=>{
@@ -1566,77 +1128,47 @@ function dailyRevenue(priceMap, qtyMap, varSel, len){
   const mediaSC_O   = <?php echo json_encode($mediaPeriodoSC_O, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const labelsCISO_O = <?php echo json_encode($labelsCISO_O, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
 
-  // ===== NOVO: Comercial ponderado por variedade =====
-  const comVarNames      = <?php echo json_encode($comVarNames, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const comHojeVarPrice  = <?php echo json_encode($comHojeVarPrice, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const comHojeVarQty    = <?php echo json_encode($comHojeVarQty, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const comOntemVarPrice = <?php echo json_encode($comOntemVarPrice, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const comOntemVarQty   = <?php echo json_encode($comOntemVarQty, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-
   // ===== NOVO F18 (linhas)
   const f18VarNames     = <?php echo json_encode($f18VarNames, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const f18SeriesByVar  = <?php echo json_encode($f18SeriesByVar, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const f18TotalSeries  = <?php echo json_encode($f18TotalSeries, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const f18TotalMean    = <?php echo json_encode($f18TotalMean, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
 
-  // NOVO: médias gerais (minutos)
-  const mediaDesc  = <?php echo json_encode($mediaDesc, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>; // minutos
+  const mediaLog   = <?php echo json_encode($mediaLog, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const mediaDesc  = <?php echo json_encode($mediaDesc, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const mediaAprov = <?php echo json_encode($mediaAprov, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
 
   const mediaPelada    = <?php echo json_encode($mediaPelada, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const mediaDefeitos  = <?php echo json_encode($mediaDefeitos, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const mediaUniform   = <?php echo json_encode($mediaUniform, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
 
-  // TIPOS + SÉRIES POR TIPO (produção, fazenda e logística) — minutos
+  // TIPOS + SÉRIES POR TIPO (produção e fazenda)
   const typesProd     = <?php echo json_encode(array_values($typesProd), JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const typesProdDesc = <?php echo json_encode(array_values($typesProdDesc), JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const typesFaz      = <?php echo json_encode(array_values($typesFaz),  JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-
-  // ===== LOGÍSTICA (2 veículos + média) — minutos
-  const typesLogSel   = <?php echo json_encode(array_values($typesLogSel), JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const logTiposSel   = <?php echo json_encode($seriesLogTiposSel, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const logDailyMeanSel = <?php echo json_encode($logDailyMeanSel, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const mediaLogSel     = <?php echo json_encode($mediaLogSel, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>; // min
-
-  // Produção / Fazenda — minutos
   const prodCarrTipos = <?php echo json_encode($seriesProdCarrTipos, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const prodDescTipos = <?php echo json_encode($seriesProdDescTipos, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const fazCarrTipos  = <?php echo json_encode($seriesFazCarrTipos,  JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
 
-  // NOVO: médias diárias (entre tipos) — minutos
+  // NOVO: média diária (entre tipos) — arrays por dia
   const prodCarrDailyMean = <?php echo json_encode($prodCarrDailyMeanSeries, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const prodDescDailyMean = <?php echo json_encode($prodDescDailyMeanSeries, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-
-  const mediaTMC_period   = <?php echo json_encode($mediaTMC_period, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>; // min
-  const mediaTMD_period   = <?php echo json_encode($mediaTMD_period, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>; // min
+  const mediaTMC_period   = <?php echo json_encode($mediaTMC_period, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const mediaTMD_period   = <?php echo json_encode($mediaTMD_period, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
 
   // Datas ISO gerais
   const labelsISO  = <?php echo json_encode($labelsISO, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
 
-  // ===== BRUTOS da Fazenda Carregamento — minutos
+  // ===== NOVO: brutos da Fazenda Carregamento (sum/cnt por dia) + média do período baseada nos brutos
   const fazCarrRawSum = <?php echo json_encode($fazCarrRawSumArr, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const fazCarrRawCnt = <?php echo json_encode($fazCarrRawCntArr, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const mediaFazCarrRaw = <?php echo json_encode($mediaFazCarrRaw, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>; // min
+  const mediaFazCarrRaw = <?php echo json_encode($mediaFazCarrRaw, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
 
   // NOVO: médias separadas Pessoas/Colhedora
   const mediaF17 = <?php echo json_encode($mediaF17, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const mediaF19 = <?php echo json_encode($mediaF19, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  
-  // META (diário)
-  const atingPct       = <?php echo json_encode($atingPct, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const atingMetaMedia = <?php echo json_encode($atingMetaMedia, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
 
-  // +++ NOVO: KPI Safra + séries para re-filtrar +++
-  const atingSafraPct  = <?php echo json_encode($atingSafraPct, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const totalRealSafra = <?php echo json_encode($totalRealSafra, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const totalMetaSafra = <?php echo json_encode($totalMetaSafra, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const diasComMeta    = <?php echo json_encode($diasComMeta, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const diasComDados   = <?php echo json_encode($diasComDados, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const diasAtingidos  = <?php echo json_encode($diasAtingidos, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const metaSeriesByDay = <?php echo json_encode($metaSeries, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const realSeriesByDay = <?php echo json_encode($series['p15_dia'], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-
-  // ===== Estado base e refs dos gráficos
+  // ===== Estado base e refs dos charts
   const BASE = {
     labels: [...labels],
     labelsISO: [...labelsISO],
@@ -1654,48 +1186,19 @@ function dailyRevenue(priceMap, qtyMap, varSel, len){
     avgPerSC_O: [...avgPerSC_O],
     mediaSC_O: mediaSC_O,
 
-    // NOVO: Comercial ponderado por variedade
-    comVarNames: [...(comVarNames || [])],
-    comHojeVarPrice: JSON.parse(JSON.stringify(comHojeVarPrice || {})),
-    comHojeVarQty:   JSON.parse(JSON.stringify(comHojeVarQty   || {})),
-    comOntemVarPrice: JSON.parse(JSON.stringify(comOntemVarPrice || {})),
-    comOntemVarQty:   JSON.parse(JSON.stringify(comOntemVarQty   || {})),
-
     typesProd: [...typesProd],
     typesProdDesc: [...typesProdDesc],
     typesFaz:  [...typesFaz],
-
     prodCarrTipos: JSON.parse(JSON.stringify(prodCarrTipos)),
     prodDescTipos: JSON.parse(JSON.stringify(prodDescTipos)),
     fazCarrTipos:  JSON.parse(JSON.stringify(fazCarrTipos)),
 
-    // LOGÍSTICA (2 veículos + média)
-    typesLogSel: [...typesLogSel],
-    logTiposSel: JSON.parse(JSON.stringify(logTiposSel)),
-    logDailyMeanSel: [...logDailyMeanSel],
-    mediaLogSel: mediaLogSel,
-
-    // médias diárias (entre tipos) em minutos
     prodCarrDailyMean: [...prodCarrDailyMean],
     prodDescDailyMean: [...prodDescDailyMean],
 
     // BRUTOS FAZENDA
     fazCarrRawSum: [...fazCarrRawSum],
     fazCarrRawCnt: [...fazCarrRawCnt],
-
-    // META (% diário)
-    atingPct: [...atingPct],
-    atingMetaMedia: atingMetaMedia,
-
-    // +++ KPI SAFRA +++
-    atingSafraPct: atingSafraPct,
-    totalRealSafra: totalRealSafra,
-    totalMetaSafra: totalMetaSafra,
-    diasComMeta: diasComMeta,
-    diasComDados: diasComDados,
-    diasAtingidos: diasAtingidos,
-    metaSeriesByDay: [...metaSeriesByDay],
-    realSeriesByDay: [...realSeriesByDay],
 
     // F18
     f18VarNames: [...f18VarNames],
@@ -1717,74 +1220,29 @@ function dailyRevenue(priceMap, qtyMap, varSel, len){
     tempo:     `<svg viewBox="0 0 24 24" class="w-6 h-6"><circle cx="12" cy="12" r="9" fill="none" stroke="#273418" stroke-width="2"/><path d="M12 7v5l4 3" fill="none" stroke="#273418" stroke-width="2" stroke-linecap="round"/></svg>`
   };
 
-  // ====== Catálogo com role explícito (+ secProdAtingSafra)
+  // ====== Catálogo com role explícito
   const ALL_SECTIONS = [
-    {id:'secProdAtingSafra', label:'Atingimento da safra (KPI)', icon:ico.producao, role:'producao'},
-
-    {id:'secComercial',      label:'Preço por SC (Atual)',           icon:ico.comercial, role:'comercial'},
+    {id:'secComercial',      label:'Preço por SC (Atual)',               icon:ico.comercial, role:'comercial'},
     {id:'secComercialOntem', label:'Preço por SC (Realizado)',       icon:ico.comercial, role:'comercial'},
-    {id:'secLogistica',      label:'Tempo transporte',                icon:ico.logistica, role:'logistica'},
-    {id:'secQPelada',        label:'Cebola Pelada (%)',              icon:ico.qualidade, role:'qualidade'},
-    {id:'secQDefeitos',      label:'Defeitos (%)',                   icon:ico.qualidade, role:'qualidade'},
-    {id:'secQUniform',       label:'Uniformidade (%)',               icon:ico.qualidade, role:'qualidade'},
-    {id:'secProdSacos',      label:'Sacos & por colaborador',        icon:ico.producao,  role:'producao'},
-    {id:'secProdAting',      label:'Atingimento da meta x Sacos/Dia',icon:ico.producao,  role:'producao' },
-    {id:'secProdCarreg',     label:'Carregamento por tipo',          icon:ico.producao,  role:'producao'},
-    {id:'secProdDesc',       label:'Descarregamento por tipo',       icon:ico.producao,  role:'producao'},
-    {id:'secProdAprov',      label:'Aproveitamento (%)',             icon:ico.producao,  role:'producao'},
-    {id:'secFazCarreg',      label:'Carregamento por tipo',          icon:ico.fazenda,   role:'fazenda'},
-    {id:'secFazPessoas',     label:'Pessoas no Campo',               icon:ico.fazenda,   role:'fazenda'},
-    {id:'secFazColhedora',   label:'Colhedora Big Bag',              icon:ico.fazenda,   role:'fazenda'},
-    {id:'secPie',            label:'Big Bag por variedade',          icon:ico.fazenda,   role:'fazenda'},
+    {id:'secLogistica',      label:'Tempo transporte',           icon:ico.logistica, role:'logistica'},
+    {id:'secQPelada',        label:'Cebola Pelada (%)',          icon:ico.qualidade, role:'qualidade'},
+    {id:'secQDefeitos',      label:'Defeitos (%)',               icon:ico.qualidade, role:'qualidade'},
+    {id:'secQUniform',       label:'Uniformidade (%)',           icon:ico.qualidade, role:'qualidade'},
+    {id:'secProdSacos',      label:'Sacos & por colaborador',    icon:ico.producao,  role:'producao'},
+    {id:'secProdCarreg',     label:'Carregamento por tipo',      icon:ico.producao,  role:'producao'},
+    {id:'secProdDesc',       label:'Descarregamento por tipo',   icon:ico.producao,  role:'producao'},
+    {id:'secProdAprov',      label:'Aproveitamento (%)',         icon:ico.producao,  role:'producao'},
+    {id:'secFazCarreg',      label:'Carregamento por tipo',      icon:ico.fazenda,   role:'fazenda'},
+    {id:'secFazPessoas',     label:'Pessoas no Campo',           icon:ico.fazenda,   role:'fazenda'},
+    {id:'secFazColhedora',   label:'Colhedora Big Bag',          icon:ico.fazenda,   role:'fazenda'},
+    {id:'secPie',            label:'Big Bag por variedade',      icon:ico.fazenda,   role:'fazenda'},
   ];
 
   const ALLOWED_SEC_IDS = <?php echo json_encode(array_values($allowedSections), JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   let selectedSecs       = new Set(<?php echo json_encode(array_values($preSelectedSecs), JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>);
   const CATALOG = ALL_SECTIONS.filter(s => ALLOWED_SEC_IDS.includes(s.id));
 
-  // ===== Helpers de tempo: agora em HORAS =====
-  const minutesToHHMM = (min) => {
-    if (min == null || isNaN(min)) return null;
-    const m = Math.round(Number(min));
-    const h = Math.floor(m / 60);
-    const mm = String(m % 60).padStart(2, '0');
-    return `${String(h).padStart(2,'0')}:${mm}`;
-  };
-  const minToHours = (v) => (v==null || isNaN(v) ? null : (Number(v)/60));
-  const seriesMinToHours = (arr) => (arr||[]).map(minToHours);
-  const dictSeriesMinToHours = (dict) => {
-    const out = {};
-    for (const k of Object.keys(dict||{})) out[k] = seriesMinToHours(dict[k]);
-    return out;
-  };
-
-  const moneyFmt = (n) => Number(n).toLocaleString('pt-BR',{ minimumFractionDigits:2, maximumFractionDigits:3 });
-
-  // Metas em HORAS (com HH:MM entre parênteses)
-  function setMetaHours(elId, minutesVal){
-    const el = document.getElementById(elId);
-    if (!el) return;
-    if (minutesVal==null || isNaN(minutesVal)) { el.textContent = '—'; return; }
-    const hh = Number(minutesVal)/60;
-    const hhmm = minutesToHHMM(minutesVal);
-    el.textContent = `• Média no período: ${hh.toLocaleString('pt-BR',{ minimumFractionDigits:2, maximumFractionDigits:3 })} h${hhmm?` (${hhmm})`:''}`;
-  }
-  function setMetaMoney(el, val) {
-    if (!el) return;
-    el.textContent = (val == null || isNaN(val))
-      ? '—'
-      : `• Média no período: R$ ${moneyFmt(val)}`;
-  }
-  function setMetaPercent(elId, val){
-    const el = document.getElementById(elId);
-    if (!el) return;
-    if (val==null || isNaN(val)) { el.textContent = '—'; return; }
-    el.textContent = `• Média no período: ${Number(val).toLocaleString('pt-BR',{ minimumFractionDigits:2, maximumFractionDigits:2 })} %`;
-  }
-
-  // ===== Modal & seleção de seções (inalterado)
-  const CHART_SECS_WITH_TIME = new Set(['secLogistica','secProdCarreg','secProdDesc','secFazCarreg']); // gráficos que exibem horas
-
+  // ===== Modal
   const graphsModal = document.getElementById('graphsModal');
   const btnGraphs   = document.getElementById('btnGraphs');
   const btnGraphsFS = document.getElementById('btnGraphsFS');
@@ -1908,7 +1366,7 @@ function dailyRevenue(priceMap, qtyMap, varSel, len){
 
   modalSearch?.addEventListener('input', renderModalColumns);
 
-  document.getElementById('modalSelAll')?.addEventListener('click', ()=>{
+  modalSelAll?.addEventListener('click', ()=>{
     const tmp = new Set(selectedSecs);
     const visibleIds = Array.from(document.querySelectorAll('#modalGridCols .sel-tile')).map(b=>b.dataset.id);
     visibleIds.forEach(id=>tmp.add(id));
@@ -1916,7 +1374,7 @@ function dailyRevenue(priceMap, qtyMap, varSel, len){
     renderModalColumns();
   });
 
-  document.getElementById('modalClear')?.addEventListener('click', ()=>{
+  modalClear ?.addEventListener('click', ()=>{
     const tmp = new Set(selectedSecs);
     const visibleIds = Array.from(document.querySelectorAll('#modalGridCols .sel-tile')).map(b=>b.dataset.id);
     visibleIds.forEach(id=>tmp.delete(id));
@@ -1953,7 +1411,7 @@ function dailyRevenue(priceMap, qtyMap, varSel, len){
     history.replaceState(null,'', url.toString());
   }
 
-  // ======= FILTRAGEM DE DATAS NO CLIENTE =====
+  // ======= FILTRAGEM DE DATAS NO CLIENTE (sem reload)
   function idxRangeByDateISO(allISO, dFrom, dTo){
     const from = dFrom ? new Date(dFrom) : null;
     const to   = dTo   ? new Date(dTo)   : null;
@@ -1968,99 +1426,40 @@ function dailyRevenue(priceMap, qtyMap, varSel, len){
   function sliceByIdx(arr, keepIdx){
     return keepIdx.map(i => (i>=0 && i<arr.length) ? arr[i] : null);
   }
+  function avgNonNull(arr){
+    let s=0,c=0; for(const v of arr){ if(v!=null && !Number.isNaN(v)){ s+=Number(v); c++; } }
+    return c? (s/c) : null;
+  }
 
-function avgNonNull(arr){
-  let s = 0, c = 0;
-  for (const v of (arr || [])) {
-    if (v == null) continue;
-    const n = Number(v);
-    if (Number.isNaN(n)) continue;
-    if (n <= 0) continue;        // <- ignora 0 e negativos
-    s += n; c++;
-  }
-  return c ? (s / c) : null;
-}
+  const minutesToHHMM = (min) => {
+    if (min == null || isNaN(min)) return null;
+    const m = Math.round(Number(min));
+    const h = Math.floor(m / 60);
+    const mm = String(m % 60).padStart(2, '0');
+    return `${String(h).padStart(2,'0')}:${mm}`;
+  };
 
-// ======== (NOVO) Helpers ponderados Comercial =========
-function weightedDailySeries(priceMap, qtyMap, varSel, len){
-  const out = new Array(len).fill(null);
-  for (let i=0;i<len;i++){
-    let ws=0, wq=0;
-    for (const v of varSel){
-      const pArr = priceMap[v] || [];
-      const qArr = qtyMap[v] || [];
-      const p = pArr[i]; const q = qArr[i];
-      if (p != null && !Number.isNaN(p) && Number(p) > 0 && q != null && !Number.isNaN(q) && Number(q) > 0){
-        ws += Number(p) * Number(q);
-        wq += Number(q);
-      }
-    }
-    out[i] = (wq > 0) ? (ws / wq) : null;
-  }
-  return out;
-}
-function weightedMean(series, weights){
-  let ws=0, wq=0;
-  for (let i=0;i<series.length;i++){
-    const p = series[i], q = weights[i];
-    if (p != null && !Number.isNaN(p) && Number(p) > 0 && q != null && !Number.isNaN(q) && Number(q) > 0){
-      ws += Number(p) * Number(q);
-      wq += Number(q);
-    }
-  }
-  return (wq>0) ? (ws / wq) : null;
-}
-function flatQtyForSelection(qtyMap, varSel, len){
-  const out = new Array(len).fill(0);
-  for (const v of varSel){
-    const arr = qtyMap[v] || [];
-    for (let i=0;i<len;i++){
-      const q = arr[i];
-      if (q != null && !Number.isNaN(q) && Number(q) > 0) out[i] += Number(q);
-    }
-  }
-  return out;
-}
-function buildVarPicker(containerId, varNames, initialSel, onChange){
-  const el = document.getElementById(containerId);
-  if (!el) return;
-  let state = new Set(initialSel && initialSel.length ? initialSel : varNames);
-  function render(){
-    el.innerHTML = '';
-    varNames.forEach(vn=>{
-      const btn = document.createElement('button');
-      const active = state.has(vn);
-      btn.type='button';
-      btn.className = `px-2 py-1 rounded-full border ${active?'bg-brand-primary text-white border-brand-primary':'bg-white text-brand-text border-brand-line'}`;
-      btn.textContent = vn;
-      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
-      btn.addEventListener('click', ()=>{
-        if (state.has(vn)) state.delete(vn); else state.add(vn);
-        if (state.size === 0) state.add(vn); // nunca vazio
-        render();
-        onChange(Array.from(state));
-      });
-      el.appendChild(btn);
-    });
-    const allBtn = document.createElement('button');
-    allBtn.type='button';
-    allBtn.className='px-2 py-1 rounded-full border bg-white text-brand-text border-brand-line';
-    allBtn.textContent='Todas';
-    allBtn.addEventListener('click', ()=>{ state = new Set(varNames); render(); onChange(Array.from(state)); });
-    el.appendChild(allBtn);
+  const setMetaMoney = (el, val) => {
+    if (!el) return;
+    el.textContent = (val == null || isNaN(val))
+      ? '—'
+      : `• Média no período: R$ ${Number(val).toLocaleString('pt-BR',{ minimumFractionDigits:2, maximumFractionDigits:3 })}`;
+  };
 
-    onChange(Array.from(state));
+  function setMetaMinutes(elId, val){
+    const el = document.getElementById(elId);
+    if (!el) return;
+    if (val==null || isNaN(val)) { el.textContent = '—'; return; }
+    const hhmm = minutesToHHMM(val);
+    el.textContent = `• Média no período: ${Math.round(val).toLocaleString('pt-BR')} min${hhmm?` (${hhmm})`:''}`;
   }
-  render();
-}
 
-// === Helpers globais usados em vários blocos ===
-function isAllNull(arr){
-  return !arr || arr.every(v => v == null);
-}
-function sumNumbers(arr){
-  return (arr || []).reduce((s, v) => s + ((v != null && !Number.isNaN(Number(v))) ? Number(v) : 0), 0);
-}
+  function setMetaPercent(elId, val){
+    const el = document.getElementById(elId);
+    if (!el) return;
+    if (val==null || isNaN(val)) { el.textContent = '—'; return; }
+    el.textContent = `• Média no período: ${Number(val).toLocaleString('pt-BR',{ minimumFractionDigits:2, maximumFractionDigits:2 })} %`;
+  }
 
   function applyDateFilterClient(dFrom, dTo){
     const url = new URL(location.href);
@@ -2071,9 +1470,6 @@ function sumNumbers(arr){
     const keep   = idxRangeByDateISO(BASE.labelsISO,    dFrom, dTo);
     const keepH  = idxRangeByDateISO(BASE.labelsCISO_H, dFrom, dTo);
     const keepO  = idxRangeByDateISO(BASE.labelsCISO_O, dFrom, dTo);
-    window._keepIdx  = keep;
-    window._keepIdxH = keepH;
-    window._keepIdxO = keepO;
 
     const L   = sliceByIdx(BASE.labels,  keep);
     const LCH = sliceByIdx(BASE.labelsC_H, keepH);
@@ -2082,161 +1478,51 @@ function sumNumbers(arr){
     const Sfil = {};
     for (const k of Object.keys(BASE.S)) Sfil[k] = sliceByIdx(BASE.S[k], keep);
 
-    // Recalcular médias gerais do recorte (MINUTOS)
+    // Recalcular médias gerais do recorte
+    const mediaLogF   = avgNonNull(Sfil.l5);
     const mediaPelF   = avgNonNull(Sfil.q6_dia);
     const mediaDefF   = avgNonNull(Sfil.q7_dia);
     const mediaUniF   = avgNonNull(Sfil.q8_dia);
     const mediaDescF  = avgNonNull(Sfil.f_desc_dia);
     const mediaAprovF = avgNonNull(Sfil.p_aprov_dia);
 
-    // PRODUÇÃO: médias diárias (entre tipos) re-filtradas — MINUTOS
-    const prodCarrMeanF_min = sliceByIdx(BASE.prodCarrDailyMean, keep);
-    const prodDescMeanF_min = sliceByIdx(BASE.prodDescDailyMean, keep);
-    const mediaTMCF_min     = avgNonNull(prodCarrMeanF_min);
-    const mediaTMDF_min     = avgNonNull(prodDescMeanF_min);
+    // PRODUÇÃO: médias diárias (entre tipos) re-filtradas
+    const prodCarrMeanF = sliceByIdx(BASE.prodCarrDailyMean, keep);
+    const prodDescMeanF = sliceByIdx(BASE.prodDescDailyMean, keep);
+    const mediaTMCF     = avgNonNull(prodCarrMeanF);
+    const mediaTMDF     = avgNonNull(prodDescMeanF);
 
-    // LOGÍSTICA (2 veículos): média diária — MINUTOS
-    const logMeanTwo_min = sliceByIdx(BASE.logDailyMeanSel, keep);
-    const mediaLogF      = avgNonNull(logMeanTwo_min);
-
-    // ===== SAFRA KPI (recalcula no recorte) =====
-    (function(){
-      const metaF = sliceByIdx(BASE.metaSeriesByDay, keep);
-      const realF = sliceByIdx(BASE.realSeriesByDay, keep);
-
-      let totMeta = 0, totReal = 0, dMeta=0, dDados=0, dAting=0;
-
-      for (let i=0;i<metaF.length;i++){
-        const m = metaF[i], r = realF[i];
-        if (m!=null && !Number.isNaN(m) && Number(m)>0) {
-          dMeta++;
-          if (r!=null && !Number.isNaN(r) && Number(r)>0) {
-            dDados++;
-            totMeta += Number(m);
-            totReal += Number(r);
-            const pct = (Number(r)/Number(m))*100;
-            if (pct >= 100) dAting++;
-          }
-        }
-      }
-
-      const kpi = (totMeta>0) ? (totReal/totMeta*100) : null;
-
-      // Atualiza textos
-      const elKpi   = document.getElementById('kp-ating-safra');
-      const elDesc  = document.getElementById('kp-ating-desc');
-      const elExtra = document.getElementById('kp-ating-extra');
-
-      const fmtPct = (p)=> Number(p).toLocaleString('pt-BR',{ minimumFractionDigits:0, maximumFractionDigits:2 });
-      const fmtNum = (n)=> Number(n).toLocaleString('pt-BR');
-
-      if (elKpi && elDesc && elExtra){
-        if (kpi == null) {
-          elKpi.textContent = '—';
-          elDesc.textContent = 'Sem dados válidos no recorte';
-          elExtra.textContent = '—';
-        } else {
-          elKpi.textContent = `${fmtPct(kpi)}%`;
-          elDesc.textContent = `${dAting}/${dDados} dias ≥ 100%`;
-          elExtra.textContent = `Realizado: ${fmtNum(totReal)} sacos • Meta: ${fmtNum(totMeta)} sacos`;
-        }
-      }
-
-// Atualiza o gauge (usa o tamanho do container)
-const can = document.getElementById('chartGaugeSafra');
-
-if (can && can._chartInstance && typeof can._chartInstance.destroy === 'function') {
-  can._chartInstance.destroy();
-}
-
-if (can) {
-  const v = kpi == null ? 0 : Math.max(0, Math.min(100, Number(kpi)));
-  const g = new Chart(can, {
-    type: 'doughnut',
-    data: {
-      labels: ['Atingido', 'Faltante'],
-      datasets: [{
-        data: [v, 100 - v],
-        backgroundColor: [THEME.g2, hexToRgba(THEME.text, .08)],
-        borderWidth: 0
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      cutout: '70%',
-      plugins: {
-        legend: { display: false },
-        tooltip: { enabled: false },
-        noData: { text: 'Sem dados no período' }
-      }
-    }
-  });
-  can._chartInstance = g;
-}
-
-    // === Comercial HOJE (ponderado + receita R$ no recorte) ===
+    // Comercial HOJE
     if (CH.comercial){
-      const sel = (window._comercialSelH && window._comercialSelH.length) ? window._comercialSelH : filterVarList(BASE.comVarNames);
-
-      // Séries completas
-      const priceFull = weightedDailySeries(BASE.comHojeVarPrice, BASE.comHojeVarQty, sel, BASE.labelsCISO_H.length); // R$/SC
-      const qtyFull   = flatQtyForSelection(BASE.comHojeVarQty,   sel, BASE.labelsCISO_H.length);                      // SC
-      const revFull   = dailyRevenue(BASE.comHojeVarPrice, BASE.comHojeVarQty, sel, BASE.labelsCISO_H.length);         // R$
-
-      // Recorte
-      const LCH   = sliceByIdx(BASE.labelsC_H,  keepH);
-      const price = sliceByIdx(priceFull, keepH);
-      const qty   = sliceByIdx(qtyFull,   keepH);
-      const rev   = sliceByIdx(revFull,   keepH);
-
-      const hasW  = sumNumbers(qty) > 0;
-      const medW  = hasW ? weightedMean(price, qty) : null;
-
-      CH.comercial.data.labels            = LCH;
-      CH.comercial.data.datasets[0].data  = rev; // barras = R$ total
-      CH.comercial.data.datasets[1].data  = (medW!=null) ? new Array(LCH.length).fill(medW) : new Array(LCH.length).fill(null); // linha = média ponderada R$/SC
+      const arr = sliceByIdx(BASE.avgPerSC_H, keepH);
+      const med = avgNonNull(arr);
+      const mediaArr = med != null ? new Array(LCH.length).fill(med) : new Array(LCH.length).fill(null);
+      CH.comercial.data.labels = LCH;
+      CH.comercial.data.datasets[0].data = arr;
+      CH.comercial.data.datasets[1].data = mediaArr;
       CH.comercial.update();
-      setMetaMoney(document.getElementById('com-meta'), medW);
+      setMetaMoney(document.getElementById('com-meta'), med);
     }
 
-    // === Comercial ONTEM (ponderado + receita R$ no recorte) ===
+    // Comercial ONTEM
     if (CH.comercialOntem){
-      const sel = (window._comercialSelO && window._comercialSelO.length) ? window._comercialSelO : filterVarList(BASE.comVarNames);
-
-      const priceFull = weightedDailySeries(BASE.comOntemVarPrice, BASE.comOntemVarQty, sel, BASE.labelsCISO_O.length);
-      const qtyFull   = flatQtyForSelection(BASE.comOntemVarQty,   sel, BASE.labelsCISO_O.length);
-      const revFull   = dailyRevenue(BASE.comOntemVarPrice, BASE.comOntemVarQty, sel, BASE.labelsCISO_O.length);
-
-      const LCO   = sliceByIdx(BASE.labelsC_O,  keepO);
-      const price = sliceByIdx(priceFull, keepO);
-      const qty   = sliceByIdx(qtyFull,   keepO);
-      const rev   = sliceByIdx(revFull,   keepO);
-
-      const hasW  = sumNumbers(qty) > 0;
-      const medW  = hasW ? weightedMean(price, qty) : null;
-
-      CH.comercialOntem.data.labels            = LCO;
-      CH.comercialOntem.data.datasets[0].data  = rev; // barras = R$ total
-      CH.comercialOntem.data.datasets[1].data  = (medW!=null) ? new Array(LCO.length).fill(medW) : new Array(LCO.length).fill(null);
+      const arr = sliceByIdx(BASE.avgPerSC_O, keepO);
+      const med = avgNonNull(arr);
+      const mediaArr = med != null ? new Array(LCO.length).fill(med) : new Array(LCO.length).fill(null);
+      CH.comercialOntem.data.labels = LCO;
+      CH.comercialOntem.data.datasets[0].data = arr;
+      CH.comercialOntem.data.datasets[1].data = mediaArr;
       CH.comercialOntem.update();
-      setMetaMoney(document.getElementById('com-ontem-meta'), medW);
+      setMetaMoney(document.getElementById('com-ontem-meta'), med);
     }
 
-    // ===== Logística (2 veículos + média) — HORAS
+    // Logística
     if (CH.logistica){
       CH.logistica.data.labels = L;
-
-      for (let i=0;i<BASE.typesLogSel.length;i++){
-        const key = BASE.typesLogSel[i];
-        const serie = seriesMinToHours(sliceByIdx(BASE.logTiposSel[key] || [], keep));
-        CH.logistica.data.datasets[i].data = serie;
-      }
-      const idxMean = CH.logistica.data.datasets.length-1;
-      CH.logistica.data.datasets[idxMean].data = seriesMinToHours(logMeanTwo_min);
-
+      CH.logistica.data.datasets[0].data = Sfil.l5;
+      CH.logistica.data.datasets[1].data = new Array(L.length).fill(mediaLogF);
       CH.logistica.update();
-      setMetaHours('log-meta', mediaLogF);
+      setMetaMinutes('log-meta', mediaLogF);
     }
 
     // Qualidade
@@ -2265,37 +1551,37 @@ if (can) {
     // Produção Sacos
     if (CH.prodSacos){
       CH.prodSacos.data.labels = L;
-      CH.prodSacos.data.datasets[0].data = Sfil.p16_dia;
-      CH.prodSacos.data.datasets[1].data = Sfil.p15_dia;
+      CH.prodSacos.data.datasets[0].data = Sfil.p15_dia;
+      CH.prodSacos.data.datasets[1].data = Sfil.p16_dia;
       CH.prodSacos.update();
     }
 
-    // Produção Carregamento — HORAS
+    // Produção Carregamento
     if (CH.prodCarreg){
       CH.prodCarreg.data.labels = L;
       for (let i=0;i<BASE.typesProd.length;i++){
         const key = BASE.typesProd[i];
-        const serie = seriesMinToHours(sliceByIdx(BASE.prodCarrTipos[key], keep));
+        const serie = sliceByIdx(BASE.prodCarrTipos[key], keep);
         CH.prodCarreg.data.datasets[i].data = serie;
       }
       const idxMean = CH.prodCarreg.data.datasets.length-1;
-      CH.prodCarreg.data.datasets[idxMean].data = seriesMinToHours(prodCarrMeanF_min);
+      CH.prodCarreg.data.datasets[idxMean].data = prodCarrMeanF;
       CH.prodCarreg.update();
-      setMetaHours('prod-carr-meta', mediaTMCF_min);
+      setMetaMinutes('prod-carr-meta', mediaTMCF);
     }
 
-    // Produção Descarregamento — HORAS
+    // Produção Descarregamento
     if (CH.prodDesc){
       CH.prodDesc.data.labels = L;
       for (let i=0;i<BASE.typesProdDesc.length;i++){
         const key = BASE.typesProdDesc[i];
-        const serie = seriesMinToHours(sliceByIdx(BASE.prodDescTipos[key], keep));
+        const serie = sliceByIdx(BASE.prodDescTipos[key], keep);
         CH.prodDesc.data.datasets[i].data = serie;
       }
       const idxMean = CH.prodDesc.data.datasets.length-1;
-      CH.prodDesc.data.datasets[idxMean].data = seriesMinToHours(prodDescMeanF_min);
+      CH.prodDesc.data.datasets[idxMean].data = prodDescMeanF;
       CH.prodDesc.update();
-      setMetaHours('prod-desc-meta', mediaTMDF_min);
+      setMetaMinutes('prod-desc-meta', mediaTMDF);
     }
 
     // Produção Aproveitamento
@@ -2307,37 +1593,27 @@ if (can) {
       setMetaPercent('prod-aprov-meta', mediaAprovF);
     }
 
-    // ===== Fazenda Carregamento — HORAS (DINÂMICO POR TIPO + média diária)
+    // Fazenda Carregamento (brutos)
     if (CH.fazCarr){
       CH.fazCarr.data.labels = L;
-
-      const ds = [];
-      const perTypeSeriesH = [];
-      for (const typeName of BASE.typesFaz){
-        const serieH = seriesMinToHours(sliceByIdx(BASE.fazCarrTipos[typeName] || [], keep));
-        perTypeSeriesH.push(serieH);
-        ds.push(mkLine(`${typeName} (total/dia)`, serieH, colorForType(typeName, true), 'y', { borderWidth:3 }));
+      for (let i=0;i<BASE.typesFaz.length;i++){
+        const key = BASE.typesFaz[i];
+        const serie = sliceByIdx(BASE.fazCarrTipos[key], keep);
+        CH.fazCarr.data.datasets[i].data = serie;
       }
-
-      const dailyMeanH = L.map((_, i) => {
-        const vals = perTypeSeriesH
-        .map(s => s[i])
-        .filter(v => v != null && !Number.isNaN(v) && Number(v) > 0);
-        return vals.length ? (vals.reduce((a,b)=>a+Number(b),0) / vals.length) : null;
-      });
-
-      ds.push(mkLine('Média diária (Fazenda • Carregamento)', dailyMeanH, THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }));
-
-      CH.fazCarr.data.datasets = ds;
+      const rawSumF = sliceByIdx(BASE.fazCarrRawSum, keep);
+      const rawCntF = sliceByIdx(BASE.fazCarrRawCnt, keep);
+      let sum=0, cnt=0;
+      for (let i=0;i<rawSumF.length;i++){
+        if (rawSumF[i]!=null && rawCntF[i]!=null && rawCntF[i]>0){
+          sum += Number(rawSumF[i]);
+          cnt += Number(rawCntF[i]);
+        }
+      }
+      const mediaRawF = (cnt>0) ? (sum/cnt) : null;
+      CH.fazCarr.data.datasets[CH.fazCarr.data.datasets.length-1].data = new Array(L.length).fill(mediaRawF);
       CH.fazCarr.update();
-
-      const mediaPeriodoMin = (function(arrH){
-        let s=0,c=0; for(const v of arrH){ if(v!=null && !Number.isNaN(v)){ s+=Number(v); c++; } }
-        const mediaH = c? (s/c) : null;
-        return mediaH==null? null : mediaH*60;
-      })(dailyMeanH);
-
-      setMetaHours('faz-carreg-meta', mediaPeriodoMin);
+      setMetaMinutes('faz-carreg-meta', mediaRawF);
     }
 
     // Pessoas
@@ -2379,8 +1655,8 @@ if (can) {
       CH.f18.data.datasets[idx+1].data = new Array(L.length).fill(mean);
       CH.f18.update();
     }
-   })(); // fecha a IIFE do bloco SAFRA KPI
-}
+  }
+
   // ===== Botões / URL state (SEM RELOAD)
   const gridCharts = document.getElementById('gridCharts');
   function visibleCardsCount(){
@@ -2474,29 +1750,29 @@ if (can) {
     id: 'noData',
     afterDraw(chart, args, opts){
       const datasets = chart?.data?.datasets || [];
+      if (!datasets.length) return drawMessage(chart, opts);
       const hasAny = datasets.some(ds => {
         const arr = Array.isArray(ds?.data) ? ds.data : [];
-        // considera qualquer número válido (inclui 0)
-        return arr.some(v => v != null && !Number.isNaN(Number(v)));
+        return arr.some(v => v !== null && v !== undefined && !(Number.isNaN(v)));
       });
-      if (hasAny) return;
-
-      const {ctx, chartArea} = chart;
-      if (!ctx || !chartArea) return;
-      const msg = (opts && opts.text) || 'Sem dados no período';
-      ctx.save();
-      ctx.fillStyle = 'rgba(0,0,0,0.5)';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.font = '600 14px Nunito, system-ui, sans-serif';
-      const x = (chartArea.left + chartArea.right)/2;
-      const y = (chartArea.top + chartArea.bottom)/2;
-      ctx.fillText(msg, x, y);
-      ctx.restore();
+      if (!hasAny) return drawMessage(chart, opts);
+      function drawMessage(chart, opts){
+        const {ctx, chartArea} = chart;
+        if (!ctx || !chartArea) return;
+        const msg = (opts && opts.text) || 'Sem dados no período';
+        ctx.save();
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.font = '600 14px Nunito, system-ui, sans-serif';
+        const x = (chartArea.left + chartArea.right)/2;
+        const y = (chartArea.top + chartArea.bottom)/2;
+        ctx.fillText(msg, x, y);
+        ctx.restore();
+      }
     }
   };
-
-Chart.register(noDataPlugin);
+  Chart.register(noDataPlugin);
 
   const lastIndexOfData = (arr)=>{ for(let i=arr.length-1;i>=0;i--){ if(arr[i]!=null) return i; } return -1; };
 
@@ -2521,7 +1797,6 @@ Chart.register(noDataPlugin);
     borderColor: color,
     backgroundColor: hexToRgba(color, .85),
   });
-
   const baseOpts = (beginAtZero=true) => ({
     responsive:true,
     layout:{ padding:{ top:8, right:30 } },
@@ -2536,31 +1811,25 @@ Chart.register(noDataPlugin);
     },
     scales:{ x:{ ticks:{ color: hexToRgba(THEME.text,.7) } }, y:{ beginAtZero, ticks:{ color: hexToRgba(THEME.text,.7) } } }
   });
-
-  // ===== Opções para HORAS (tooltip HH:MM)
-  const hoursOpts = {
+  const minutesOpts = {
     ...baseOpts(true),
     plugins: {
       ...baseOpts(true).plugins,
       tooltip:{ callbacks:{ label:(ctx)=>{
-        const vH = ctx.parsed.y;
-        if (vH==null) return `${ctx.dataset.label}: -`;
-        const min = Number(vH)*60;
-        const hhmm = minutesToHHMM(min);
-        return `${ctx.dataset.label}: ${vH.toLocaleString('pt-BR',{ minimumFractionDigits:2, maximumFractionDigits:3 })} h${hhmm?` (${hhmm})`:''}`;
+        const v = ctx.parsed.y;
+        if (v==null) return `${ctx.dataset.label}: -`;
+        const m = Math.round(Number(v));
+        const h = Math.floor(m/60);
+        const mm = String(m%60).padStart(2,'0');
+        return `${ctx.dataset.label}: ${Math.round(v).toLocaleString('pt-BR')} min (${String(h).padStart(2,'0')}:${mm})`;
       }}}
     },
-    scales:{ y:{ beginAtZero:true, title:{ display:true, text:'Horas' } }, x:{ ticks:{ color: hexToRgba(THEME.text,.7) } } }
+    scales:{ y:{ beginAtZero:true, title:{ display:true, text:'Minutos' } }, x:{ ticks:{ color: hexToRgba(THEME.text,.7) } } }
   };
-
   const typePalette = ['#0072B2','#E69F00','#D55E00','#CC79A7','#56B4E9','#009E73','#F0E442','#000000','#8A2BE2','#FF7F50','#3CB371','#DA70D6'];
   const colorForType = (name, isFaz=false, isDesc=false) => {
     const baseList = isFaz ? typesFaz : (isDesc ? typesProdDesc : typesProd);
     const idx = baseList.indexOf(name);
-    return typePalette[Math.max(0, idx) % typePalette.length];
-  };
-  const colorForLog = (name) => {
-    const idx = (BASE.typesLogSel || []).indexOf(name);
     return typePalette[Math.max(0, idx) % typePalette.length];
   };
   const colorForVar = (name) => {
@@ -2568,150 +1837,70 @@ Chart.register(noDataPlugin);
     return typePalette[Math.max(0, idx) % typePalette.length];
   };
 
-// ===== Comercial HOJE (barras = R$ total; linha = média ponderada R$/SC) =====
-(function(){
-  const el = document.getElementById('chartComercialMedia');
-  if (!el) return;
-
-  CH.comercial = new Chart(el, {
-    data: { labels: BASE.labelsC_H, datasets: [
-      // Barras: valor total do dia (R$)
-      mkBar('Valor total do dia (R$)', new Array(BASE.labelsC_H.length).fill(null), THEME.g2, 'y1'),
-      // Linha tracejada: média ponderada R$/SC (constante no recorte)
-      mkLine('Média ponderada (R$/SC)', new Array(BASE.labelsC_H.length).fill(null), THEME.g3, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }),
-    ]},
-    options: {
-      ...baseOpts(true),
-      plugins:{
-        ...baseOpts(true).plugins,
-        tooltip:{ callbacks:{ label:(ctx)=>{
-          const v = ctx.parsed.y;
-          if (ctx.dataset.yAxisID === 'y1') {
-            const txt = (v==null?'-':v.toLocaleString('pt-BR',{ minimumFractionDigits:2, maximumFractionDigits:2 }));
-            return `${ctx.dataset.label}: R$ ${txt}`;
-          } else {
+  // ===== Comercial HOJE
+  (function(){
+    const el = document.getElementById('chartComercialMedia');
+    if (!el) return;
+    const mediaPlanaArr = BASE.mediaSC_H != null ? new Array(BASE.labelsC_H.length).fill(BASE.mediaSC_H) : new Array(BASE.labelsC_H.length).fill(null);
+    CH.comercial = new Chart(el, {
+      data: { labels: BASE.labelsC_H, datasets: [
+        mkBar ('Preço por SC (R$)', BASE.avgPerSC_H, THEME.g1),
+        mkLine('Média do período', mediaPlanaArr, THEME.g3, 'y', { pointRadius:0, borderWidth:3, borderDash:[6,4] }),
+      ]},
+      options: {
+        ...baseOpts(true),
+        plugins:{
+          ...baseOpts(true).plugins,
+          tooltip:{ callbacks:{ label:(ctx)=>{
+            const v = ctx.parsed.y;
             const txt = (v==null?'-':v.toLocaleString('pt-BR',{ minimumFractionDigits:2, maximumFractionDigits:3 }));
-            return `${ctx.dataset.label}: R$ ${txt}/SC`;
-          }
-        }}}
-      },
-      scales: {
-        y:  { beginAtZero:true, position:'left',  title:{ display:true, text:'R$/SC' } },
-        y1: { beginAtZero:true, position:'right', title:{ display:true, text:'R$ (total do dia)' }, grid:{ drawOnChartArea:false } }
-      }
-    }
-  });
-
-  // Seletor e cálculo inicial (já ignorando Refugo/Resíduo)
-  const varNames = filterVarList(BASE.comVarNames);
-  buildVarPicker('comercialVarPicker', varNames, varNames, (sel) => {
-    window._comercialSelH = sel;
-
-    const idx = (window._keepIdxH && window._keepIdxH.length)
-      ? window._keepIdxH
-      : BASE.labelsCISO_H.map((_, i) => i);
-
-    // séries completas
-    const priceFull = weightedDailySeries(BASE.comHojeVarPrice, BASE.comHojeVarQty, sel, BASE.labelsCISO_H.length);
-    const qtyFull   = flatQtyForSelection   (BASE.comHojeVarQty,                     sel, BASE.labelsCISO_H.length);
-    const revFull   = dailyRevenue          (BASE.comHojeVarPrice, BASE.comHojeVarQty, sel, BASE.labelsCISO_H.length);
-
-    // aplica recorte
-    const price = sliceByIdx(priceFull, idx);
-    const qty   = sliceByIdx(qtyFull,   idx);
-    const rev   = sliceByIdx(revFull,   idx);
-
-    // atualiza o gráfico (barras = R$ total do dia)
-    CH.comercial.data.datasets[0].data = rev;
-
-    // média ponderada R$/SC no recorte
-    const hasW = sumNumbers(qty) > 0;
-    const medW = hasW ? weightedMean(price, qty) : null;
-
-    // linha horizontal constante com a média do recorte (mesmo número de pontos que o gráfico já tem)
-    CH.comercial.data.datasets[1].data = (medW != null)
-      ? new Array(CH.comercial.data.labels.length).fill(medW)
-      : new Array(CH.comercial.data.labels.length).fill(null);
-
-    CH.comercial.update();
-    setMetaMoney(document.getElementById('com-meta'), medW); // mostra a média do recorte (sem fallback)
-  });
-})();
-
-  // ===== Comercial ONTEM (inicia ponderado) =====
- // ===== Comercial ONTEM (barras = R$ total; linha = média ponderada R$/SC) =====
-(function(){
-  const el = document.getElementById('chartComercialOntem');
-  if (!el) return;
-
-  CH.comercialOntem = new Chart(el, {
-    data: { labels: BASE.labelsC_O, datasets: [
-      mkBar('Valor total do dia (R$)', new Array(BASE.labelsC_O.length).fill(null), THEME.g1, 'y1'),
-      mkLine('Média ponderada (R$/SC)', new Array(BASE.labelsC_O.length).fill(null), THEME.g3, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }),
-    ]},
-    options: {
-      ...baseOpts(true),
-      plugins:{
-        ...baseOpts(true).plugins,
-        tooltip:{ callbacks:{ label:(ctx)=>{
-          const v = ctx.parsed.y;
-          if (ctx.dataset.yAxisID === 'y1') {
-            const txt = (v==null?'-':v.toLocaleString('pt-BR',{ minimumFractionDigits:2, maximumFractionDigits:2 }));
             return `${ctx.dataset.label}: R$ ${txt}`;
-          } else {
-            const txt = (v==null?'-':v.toLocaleString('pt-BR',{ minimumFractionDigits:2, maximumFractionDigits:3 }));
-            return `${ctx.dataset.label}: R$ ${txt}/SC`;
-          }
-        }}}
-      },
-      scales: {
-        y:  { beginAtZero:true, position:'left',  title:{ display:true, text:'R$/SC' } },
-        y1: { beginAtZero:true, position:'right', title:{ display:true, text:'R$ (total do dia)' }, grid:{ drawOnChartArea:false } }
+          }}}
+        },
+        scales: { y:{ beginAtZero:true, title:{ display:true, text:'R$/SC' } }, x:{ ticks:{ color: hexToRgba(THEME.text,.7) } } }
       }
-    }
-  });
+    });
+    setMetaMoney(document.getElementById('com-meta'), BASE.mediaSC_H);
+  })();
 
-  const varNames = filterVarList(BASE.comVarNames);
-  buildVarPicker('comercialOntemVarPicker', varNames, varNames, (sel) => {
-  window._comercialSelO = sel;
+  // ===== Comercial ONTEM (novo)
+  (function(){
+    const el = document.getElementById('chartComercialOntem');
+    if (!el) return;
+    const mediaPlanaArr = BASE.mediaSC_O != null ? new Array(BASE.labelsC_O.length).fill(BASE.mediaSC_O) : new Array(BASE.labelsC_O.length).fill(null);
+    CH.comercialOntem = new Chart(el, {
+      data: { labels: BASE.labelsC_O, datasets: [
+        mkBar ('Preço por SC (Realizado)', BASE.avgPerSC_O, THEME.g2),
+        mkLine('Média do período',     mediaPlanaArr,  THEME.g3, 'y', { pointRadius:0, borderWidth:3, borderDash:[6,4] }),
+      ]},
+      options: {
+        ...baseOpts(true),
+        plugins:{
+          ...baseOpts(true).plugins,
+          tooltip:{ callbacks:{ label:(ctx)=>{
+            const v = ctx.parsed.y;
+            const txt = (v==null?'-':v.toLocaleString('pt-BR',{ minimumFractionDigits:2, maximumFractionDigits:3 }));
+            return `${ctx.dataset.label}: R$ ${txt}`;
+          }}}
+        },
+        scales: { y:{ beginAtZero:true, title:{ display:true, text:'R$/SC' } }, x:{ ticks:{ color: hexToRgba(THEME.text,.7) } } }
+      }
+    });
+    setMetaMoney(document.getElementById('com-ontem-meta'), BASE.mediaSC_O);
+  })();
 
-  const idx = (window._keepIdxO && window._keepIdxO.length)
-    ? window._keepIdxO
-    : BASE.labelsCISO_O.map((_, i) => i);
-
-  const priceFull = weightedDailySeries(BASE.comOntemVarPrice, BASE.comOntemVarQty, sel, BASE.labelsCISO_O.length);
-  const qtyFull   = flatQtyForSelection   (BASE.comOntemVarQty,                     sel, BASE.labelsCISO_O.length);
-  const revFull   = dailyRevenue          (BASE.comOntemVarPrice, BASE.comOntemVarQty, sel, BASE.labelsCISO_O.length);
-
-  const price = sliceByIdx(priceFull, idx);
-  const qty   = sliceByIdx(qtyFull,   idx);
-  const rev   = sliceByIdx(revFull,   idx);
-
-  CH.comercialOntem.data.datasets[0].data = rev;
-
-  const hasW = sumNumbers(qty) > 0;
-  const medW = hasW ? weightedMean(price, qty) : null;
-
-  CH.comercialOntem.data.datasets[1].data = (medW != null)
-    ? new Array(CH.comercialOntem.data.labels.length).fill(medW)
-    : new Array(CH.comercialOntem.data.labels.length).fill(null);
-
-  CH.comercialOntem.update();
-  setMetaMoney(document.getElementById('com-ontem-meta'), medW);
-});
-})();
-
-  // ===== LOGÍSTICA (2 veículos + média) — HORAS
+  // ===== Logística
   (function(){
     const el = document.getElementById('chartLogistica');
     if (!el) return;
-    CH.logistica = new Chart(el, { data:{ labels, datasets:[] }, options:{ ...hoursOpts, plugins:{ ...hoursOpts.plugins, legend:{ position:'bottom', labels:{ boxWidth:12 } } } } });
-
-    const ds = (BASE.typesLogSel || []).map(k => ({ ...mkLine(k, seriesMinToHours(BASE.logTiposSel[k]||[]), colorForLog(k), 'y') }));
-    ds.push(mkLine('Média (Carreta LS + Truck)', seriesMinToHours(BASE.logDailyMeanSel), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 } ));
-    CH.logistica.data.datasets = ds; CH.logistica.update();
-
-    setMetaHours('log-meta', BASE.mediaLogSel);
+    CH.logistica = new Chart(el, {
+      data:{ labels, datasets:[
+        mkLine('Tempo de transporte (min)', S.l5, THEME.g2, 'y'),
+        mkLine('Média no período (min)', new Array(labels.length).fill(<?php echo json_encode($mediaLog, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }),
+      ]},
+      options: minutesOpts
+    });
+    setMetaMinutes('log-meta', <?php echo json_encode($mediaLog, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>);
   })();
 
   // ===== Qualidade (3 gráficos)
@@ -2734,7 +1923,7 @@ Chart.register(noDataPlugin);
     CH.qPelada = new Chart(el, {
       data:{ labels, datasets:[
         mkLine('Pelada (%)',           S.q6_dia, THEME.yellow),
-        mkLine('Média no período (%)', new Array(labels.length).fill(<?php echo json_encode($mediaPelada, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 } ),
+        mkLine('Média no período (%)', new Array(labels.length).fill(<?php echo json_encode($mediaPelada, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }),
       ]},
       options: mkQualOpts()
     });
@@ -2747,7 +1936,7 @@ Chart.register(noDataPlugin);
     CH.qDefeitos = new Chart(el, {
       data:{ labels, datasets:[
         mkLine('Defeitos (%)',         S.q7_dia, THEME.red),
-        mkLine('Média no período (%)', new Array(labels.length).fill(<?php echo json_encode($mediaDefeitos, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 } ),
+        mkLine('Média no período (%)', new Array(labels.length).fill(<?php echo json_encode($mediaDefeitos, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }),
       ]},
       options: mkQualOpts()
     });
@@ -2760,7 +1949,7 @@ Chart.register(noDataPlugin);
     CH.qUniform = new Chart(el, {
       data:{ labels, datasets:[
         mkLine('Uniformidade (%)',     S.q8_dia, THEME.g3),
-        mkLine('Média no período (%)', new Array(labels.length).fill(<?php echo json_encode($mediaUniform, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 } ),
+        mkLine('Média no período (%)', new Array(labels.length).fill(<?php echo json_encode($mediaUniform, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }),
       ]},
       options: mkQualOpts()
     });
@@ -2773,8 +1962,8 @@ Chart.register(noDataPlugin);
     if (!el) return;
     CH.prodSacos = new Chart(el, {
       data:{ labels, datasets:[
-        mkLine('Sacos por colaborador',      S.p16_dia, THEME.yellow, 'y'),
-        mkBar ('Sacos beneficiados (dia)',   S.p15_dia, THEME.g2,     'y1'),
+        mkLine ('Sacos por colaborador', S.p15_dia, THEME.yellow, 'y'),
+        mkBar ('Sacos beneficiados (dia)',     S.p16_dia, THEME.g2, 'y1'),
       ]},
       options:{
         responsive:true,
@@ -2794,79 +1983,26 @@ Chart.register(noDataPlugin);
     });
   })();
 
-  // ===== Produção: Atingimento da Meta (%) — versão simples (só 1 linha)
-  (function(){
-    const el = document.getElementById('chartProdAting');
-    if (!el) return;
-
-    const hasAting = (BASE.atingPct || []).some(v => v != null && !Number.isNaN(v));
-
-    if (!hasAting) {
-      CH.prodAting = new Chart(el, {
-        data: { labels, datasets: [] },
-        options: {
-          responsive: true,
-          plugins: { legend: { display:false }, noData: { text:'Sem dados no período' } },
-          scales: { y:{ beginAtZero:true, suggestedMax:120, title:{ display:true, text:'Atingimento (%)' } } }
-        }
-      });
-      const elMeta = document.getElementById('prod-ating-meta');
-      if (elMeta) elMeta.textContent = '—';
-      return;
-    }
-
-    CH.prodAting = new Chart(el, {
-      data: {
-        labels,
-        datasets: [
-          mkLine('Meta', BASE.atingPct, THEME.g2, 'y', { borderWidth:3 })
-        ]
-      },
-      options: {
-        responsive: true,
-        plugins: {
-          legend: { position:'bottom' },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => {
-                const v = ctx.parsed.y;
-                const txt = (v==null?'-':Number(v).toLocaleString('pt-BR',{ minimumFractionDigits:0, maximumFractionDigits:2 }));
-                return `${ctx.dataset.label}: ${txt} %`;
-              }
-            }
-          },
-          noData:{ text:'Sem dados no período' }
-        },
-        scales: {
-          y: { beginAtZero:true, suggestedMax:120, title:{ display:true, text:'Atingimento (%)' } }
-        }
-      }
-    });
-
-    const elMeta = document.getElementById('prod-ating-meta');
-    if (elMeta) elMeta.textContent = '—';
-  })();
-
-  // ===== Produção: Carregamento — HORAS
+  // ===== Produção: Carregamento
   (function(){
     const el = document.getElementById('chartProdCarreg');
     if (!el) return;
-    CH.prodCarreg = new Chart(el, { data:{ labels, datasets:[] }, options:{ ...hoursOpts, plugins:{ ...hoursOpts.plugins, legend:{ position:'bottom', labels:{ boxWidth:12 } } } } });
-    const ds = typesProd.map(k => ({ ...mkLine(k, seriesMinToHours(prodCarrTipos[k]||[]), (colorForType(k, false, false)), 'y') }));
-    ds.push(mkLine('Média diária (entre tipos)', seriesMinToHours(BASE.prodCarrDailyMean), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 } ));
+    CH.prodCarreg = new Chart(el, { data:{ labels, datasets:[] }, options:{ ...minutesOpts, plugins:{ ...minutesOpts.plugins, legend:{ position:'bottom', labels:{ boxWidth:12 } } } } });
+    const ds = typesProd.map(k => ({ ...mkLine(k, (prodCarrTipos[k]||[]), (colorForType(k, false, false)), 'y') }));
+    ds.push(mkLine('Média diária (entre tipos)', prodCarrDailyMean, THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }));
     CH.prodCarreg.data.datasets = ds; CH.prodCarreg.update();
-    setMetaHours('prod-carr-meta', <?php echo json_encode($mediaTMC_period, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>);
+    setMetaMinutes('prod-carr-meta', <?php echo json_encode($mediaTMC_period, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>);
   })();
 
-  // ===== Produção: Descarregamento — HORAS
+  // ===== Produção: Descarregamento
   (function(){
     const el = document.getElementById('chartProdDesc');
     if (!el) return;
-    CH.prodDesc = new Chart(el, { data:{ labels, datasets:[] }, options:{ ...hoursOpts, plugins:{ ...hoursOpts.plugins, legend:{ position:'bottom', labels:{ boxWidth:12 } } } } });
-    const ds = typesProdDesc.map(k => ({ ...mkLine(k, seriesMinToHours(prodDescTipos[k]||[]), (colorForType(k, false, true)), 'y') }));
-    ds.push(mkLine('Média diária (entre tipos)', seriesMinToHours(BASE.prodDescDailyMean), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 } ));
+    CH.prodDesc = new Chart(el, { data:{ labels, datasets:[] }, options:{ ...minutesOpts, plugins:{ ...minutesOpts.plugins, legend:{ position:'bottom', labels:{ boxWidth:12 } } } } });
+    const ds = typesProdDesc.map(k => ({ ...mkLine(k, (prodDescTipos[k]||[]), (colorForType(k, false, true)), 'y') }));
+    ds.push(mkLine('Média diária (entre tipos)', prodDescDailyMean, THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }));
     CH.prodDesc.data.datasets = ds; CH.prodDesc.update();
-    setMetaHours('prod-desc-meta', <?php echo json_encode($mediaTMD_period, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>);
+    setMetaMinutes('prod-desc-meta', <?php echo json_encode($mediaTMD_period, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>);
   })();
 
   // ===== Produção: Aproveitamento
@@ -2878,7 +2014,7 @@ Chart.register(noDataPlugin);
     CH.prodAprov = new Chart(el, {
       data:{ labels, datasets:[
         mkLine('Aproveitamento (%)', S.p_aprov_dia, THEME.g2, 'y'),
-        mkLine('Média no período (%)', new Array(labels.length).fill(<?php echo json_encode($mediaAprov, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 } ),
+        mkLine('Média no período (%)', new Array(labels.length).fill(<?php echo json_encode($mediaAprov, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }),
       ]},
       options: {
         ...baseOpts(true),
@@ -2895,40 +2031,15 @@ Chart.register(noDataPlugin);
     });
   })();
 
-  // ===== Fazenda Carregamento — HORAS (DINÂMICO)
+  // ===== Fazenda Carregamento (brutos)
   (function(){
     const el = document.getElementById('chartFazendaCarreg');
     if (!el) return;
-
-    const ds = [];
-    const perTypeSeriesH = [];
-    for (const typeName of BASE.typesFaz){
-      const serieH = seriesMinToHours(BASE.fazCarrTipos[typeName] || new Array(labels.length).fill(null));
-      perTypeSeriesH.push(serieH);
-      ds.push(mkLine(`${typeName} (total/dia)`, serieH, colorForType(typeName, true), 'y', { borderWidth:3 }));
-    }
-
-    const dailyMeanH = labels.map((_, i) => {
-      const vals = perTypeSeriesH
-        .map(s => s[i])
-        .filter(v => v != null && !Number.isNaN(v) && Number(v) > 0);
-      return vals.length ? (vals.reduce((a,b)=>a+Number(b),0) / vals.length) : null;
-    });
-
-    const mediaPeriodoMin = (function(arrH){
-      let s=0,c=0; for(const v of arrH){ if(v!=null && !Number.isNaN(v)){ s+=Number(v); c++; } }
-      const mediaH = c? (s/c) : null;
-      return mediaH==null? null : mediaH*60;
-    })(dailyMeanH);
-
-    ds.push(mkLine('Média diária (Fazenda • Carregamento)', dailyMeanH, THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }));
-
-    CH.fazCarr = new Chart(el, {
-      data:{ labels, datasets: ds },
-      options:{ ...hoursOpts, plugins:{ ...hoursOpts.plugins, legend:{ position:'bottom', labels:{ boxWidth:12 } } } }
-    });
-
-    setMetaHours('faz-carreg-meta', mediaPeriodoMin);
+    CH.fazCarr = new Chart(el, { data:{ labels, datasets:[] }, options:{ ...minutesOpts, plugins:{ ...minutesOpts.plugins, legend:{ position:'bottom', labels:{ boxWidth:12 } } } } });
+    const ds = typesFaz.map(k => ({ ...mkLine(k, (fazCarrTipos[k]||[]), (colorForType(k, true, false)), 'y') }));
+    ds.push(mkLine('Média no período (min)', new Array(labels.length).fill(mediaFazCarrRaw), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }));
+    CH.fazCarr.data.datasets = ds; CH.fazCarr.update();
+    setMetaMinutes('faz-carreg-meta', mediaFazCarrRaw);
   })();
 
   // ===== Pessoas (F17)
@@ -2937,8 +2048,8 @@ Chart.register(noDataPlugin);
     if (!el) return;
     CH.fazPessoas = new Chart(el, {
       data:{ labels, datasets:[
-        mkBar ('Pessoas/dia', S.f17_dia, THEME.g3, 'y'),
-        mkLine('Média no período', new Array(labels.length).fill(mediaF17), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 } ),
+        mkBar ('F17 Pessoas/dia (bruto)', S.f17_dia, THEME.g3, 'y'),
+        mkLine('Média no período', new Array(labels.length).fill(mediaF17), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }),
       ]},
       options:{
         responsive:true,
@@ -2956,8 +2067,8 @@ Chart.register(noDataPlugin);
     if (!el) return;
     CH.fazColhedora = new Chart(el, {
       data:{ labels, datasets:[
-        mkBar ('Colhedora/dia', S.f19_dia, THEME.g2, 'y'),
-        mkLine('Média no período', new Array(labels.length).fill(mediaF19), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 } ),
+        mkBar ('F19 Colhedora/dia (bruto)', S.f19_dia, THEME.g2, 'y'),
+        mkLine('Média no período', new Array(labels.length).fill(mediaF19), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }),
       ]},
       options:{
         responsive:true,
@@ -2994,54 +2105,6 @@ Chart.register(noDataPlugin);
     CH.f18.update();
   })();
 
-  // ===== KPI GERAL SAFRA — render inicial (gauge + textos)
-  (function(){
-    const elGauge = document.getElementById('chartGaugeSafra');
-    const elKpi   = document.getElementById('kp-ating-safra');
-    const elDesc  = document.getElementById('kp-ating-desc');
-    const elExtra = document.getElementById('kp-ating-extra');
-
-    const fmtPct = (p)=> Number(p).toLocaleString('pt-BR',{ minimumFractionDigits:0, maximumFractionDigits:2 });
-    const fmtNum = (n)=> Number(n).toLocaleString('pt-BR');
-
-    if (elKpi && elDesc && elExtra) {
-      if (BASE.atingSafraPct == null) {
-        elKpi.textContent = '—';
-        elDesc.textContent = 'Sem dados válidos no período';
-        elExtra.textContent = '—';
-      } else {
-        elKpi.textContent = `${fmtPct(BASE.atingSafraPct)}%`;
-        elDesc.textContent = `${BASE.diasAtingidos}/${BASE.diasComDados} dias ≥ 100%`;
-        elExtra.textContent = `Realizado: ${fmtNum(BASE.totalRealSafra)} sacos • Meta: ${fmtNum(BASE.totalMetaSafra)} sacos`;
-      }
-    }
-
-    if (elGauge) {
-      const v = BASE.atingSafraPct == null ? 0 : Math.max(0, Math.min(100, Number(BASE.atingSafraPct)));
-      const g = new Chart(elGauge, {
-        type: 'doughnut',
-        data: {
-          labels: ['Atingido','Faltante'],
-          datasets: [{
-            data: [v, 100 - v],
-            backgroundColor: [THEME.g2, hexToRgba(THEME.text, .08)],
-            borderWidth: 0
-          }]
-        },
-        options: {
-          cutout: '70%',
-          plugins: { legend: { display: false }, tooltip: { enabled: false }, noData:{ text:'Sem dados no período' } }
-        }
-      });
-      elGauge._chartInstance = g;
-    }
-  })();
-
-  /**
- * Calcula preço médio ponderado do dia (CX1..CX5), ignorando Refugo e Resíduo.
- * Retorna float (duas casas) ou null se não der pra calcular.
- * Espera estrutura compatível com seu payload_json (comercial.vendas, producao.romaneio).
- */
   // ===== Mostrar seções iniciais e meta
   function updateGridCols(){
     const isFS = !!document.fullscreenElement;
@@ -3054,14 +2117,6 @@ Chart.register(noDataPlugin);
   document.addEventListener('fullscreenchange', updateGridCols);
   window.addEventListener('resize', updateGridCols);
 
-  // Estado inicial de seções + metas
-  applySecFilter();
-
-  // Metas iniciais em HORAS para os gráficos de tempo
-  setMetaHours('log-meta', BASE.mediaLogSel);
-  setMetaHours('prod-carr-meta', <?php echo json_encode($mediaTMC_period, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>);
-  setMetaHours('prod-desc-meta', <?php echo json_encode($mediaTMD_period, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>);
-  // Fazenda carregamento é setado no bloco do chart após calcular média diária
 </script>
 </body>
 </html>
