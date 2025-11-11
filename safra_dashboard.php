@@ -850,7 +850,7 @@ $stPH->execute([
   ':u2'   => $unidade,
 ]);
 
-/* 5) Preços ONTEM (ponderado por caixa, inline) */
+/* 5) Preços ONTEM (ponderado por caixa, inlinee) */
 $sqlPO = "
   SELECT
     p.ref_date,
@@ -864,7 +864,7 @@ $sqlPO = "
     ON  cv.ref_date  = p.ref_date
     AND cv.variedade = p.variedade
     AND cv.caixa     = p.caixa
-  WHERE p.ref_date >= :from AND p.ref_date < DATE_ADD(:to, INTERVAL 1 DAY)
+  WHRE p.ref_date >= :from AND p.ref_date < DATE_ADD(:to, INTERVAL 1 DAY)
     AND (:u1 = '' OR cv.unidade = :u2)
     AND cv.preco_ontem IS NOT NULL
   GROUP BY p.ref_date, p.variedade
