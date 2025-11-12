@@ -1236,7 +1236,7 @@ foreach ($tabOrder as $t) { if (!empty($can[$t])) { $defaultTab = $t; break; } }
                 </span>
               </label>
             </div>
-            <?php echo render_rows_compact($rowsP14,[ 'variedade'=>'Variedade','cx1'=>'Cx1','cx2'=>'Cx2','cx3'=>'Cx3','cx4'=>'Cx4','cx5'=>'Cx5','residuo'=>'Resíduo','refugo'=>'Refugo' ]); ?>
+            <?php echo render_rows_compact($rowsP14,[ 'variedade'=>'Variedade','cx1'=>'Cx1','cx2'=>'Cx2','cx3'=>'Cx3','cx3G'=>'Cx 3G','cx4'=>'Cx4','cx5'=>'Cx5','residuo'=>'Resíduo','refugo'=>'Refugo' ]); ?>
             <div id="pRomaneio" class="space-y-3 mt-3"></div>
             <input type="hidden" name="p_romaneio" id="p_romaneio_json" />
           </div>
@@ -1451,7 +1451,7 @@ document.addEventListener('DOMContentLoaded', () => {
     return { add, snap:snapshot, clear, setRows };
   }
 
-  const CAIXAS     = ['Caixa 1','Caixa 2','Caixa 3','Caixa 4','Caixa 5'];
+  const CAIXAS     = ['Caixa 1','Caixa 2','Caixa 3','Caixa 3G','Caixa 4','Caixa 5'];
   const VARIEDADES = ['Mirela','Madalin','Topazio','Robusta','Karaja','Vale Sul','Lucinda','Irati','Salto Grande'];
   const TIPOS_DESC = [{value:'carreta_ls',label:'Carreta LS'},{value:'truck',label:'Truck'}];
   const TIPOS_CARG = [{value:'carreta_ls',label:'Carreta LS'},{value:'truck',label:'Truck'},{value:'bitruck',label:'Bitruck'},{value:'sider',label:'Sider'}];
@@ -1488,6 +1488,7 @@ document.addEventListener('DOMContentLoaded', () => {
       { name:'cx1', label:'Cx 1', type:'number', attrs:{ step:'1', min:'0' } },
       { name:'cx2', label:'Cx 2', type:'number', attrs:{ step:'1', min:'0' } },
       { name:'cx3', label:'Cx 3', type:'number', attrs:{ step:'1', min:'0' } },
+      { name:'cx3G', label:'Cx 3G', type:'number', attrs:{ step:'1', min:'0' } },
       { name:'cx4', label:'Cx 4', type:'number', attrs:{ step:'1', min:'0' } },
       { name:'cx5', label:'Cx 5', type:'number', attrs:{ step:'1', min:'0' } },
       { name:'residuo', label:'Resíduo', type:'number', attrs:{ step:'1', min:'0' } },
@@ -1548,13 +1549,13 @@ document.addEventListener('DOMContentLoaded', () => {
     for (const r of rows){
       const v = (r.variedade||'').trim();
       if (!v) continue;
-      if (!agg[v]) agg[v] = {cx1:0,cx2:0,cx3:0,cx4:0,cx5:0,residuo:0,refugo:0};
-      ['cx1','cx2','cx3','cx4','cx5','residuo','refugo'].forEach(k=> agg[v][k]+= toNum(r[k]));
+      if (!agg[v]) agg[v] = {cx1:0,cx2:0,cx3:0,cx3G:0,cx4:0,cx5:0,residuo:0,refugo:0};
+      ['cx1','cx2','cx3','cx3G','cx4','cx5','residuo','refugo'].forEach(k=> agg[v][k]+= toNum(r[k]));
     }
     const aprovRows = [];
     let totUti=0, totAll=0;
     Object.entries(agg).forEach(([variedade,val])=>{
-      const util = val.cx1+val.cx2+val.cx3+val.cx4+val.cx5;
+      const util = val.cx1+val.cx2+val.cx3+val.cx3G+val.cx4+val.cx5;
       const den  = util + val.residuo + val.refugo;
       const pct  = den>0 ? (util/den*100) : null;
       if (den>0){ totUti+=util; totAll+=den; }

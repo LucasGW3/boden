@@ -1594,26 +1594,6 @@ function filterVarList(names){
   return out;
 }
 
-function dailyRevenue(priceMap, qtyMap, varSel, len){
-  const out = new Array(len).fill(null);
-  for (let i = 0; i < len; i++){
-    let sum = 0, any = false;
-    for (let k = 0; k < varSel.length; k++){
-      const v = varSel[k];
-      const pArr = (priceMap[v] || []);
-      const qArr = (qtyMap[v]   || []);
-      const p = pArr[i];
-      const q = qArr[i];
-      if (p != null && q != null && !Number.isNaN(p) && !Number.isNaN(q) && Number(q) > 0){
-        sum += Number(p) * Number(q);
-        any = true;
-      }
-    }
-    out[i] = any ? sum : null;
-  }
-  return out;
-}
-
   const THEME = { g1:'#9DBF21', g2:'#56A632', g3:'#63AA35', soft:'#cfe87a', red:'#EA0004', yellow:'#FFC107', text:'#1e1e1e' };
 
   document.getElementById('btnFull')?.addEventListener('click',()=>{
@@ -2251,49 +2231,45 @@ if (can) {
   can._chartInstance = g;
 }
 
-    // === Comercial HOJE (ponderado + receita R$ no recorte) ===
+    // === Comercial HOJE (ponderado + preço diário no recorte) ===
     if (CH.comercial){
       const sel = (window._comercialSelH && window._comercialSelH.length) ? window._comercialSelH : filterVarList(BASE.comVarNames);
 
       // Séries completas
       const priceFull = weightedDailySeries(BASE.comHojeVarPrice, BASE.comHojeVarQty, sel, BASE.labelsCISO_H.length); // R$/SC
       const qtyFull   = flatQtyForSelection(BASE.comHojeVarQty,   sel, BASE.labelsCISO_H.length);                      // SC
-      const revFull   = dailyRevenue(BASE.comHojeVarPrice, BASE.comHojeVarQty, sel, BASE.labelsCISO_H.length);         // R$
 
       // Recorte
       const LCH   = sliceByIdx(BASE.labelsC_H,  keepH);
       const price = sliceByIdx(priceFull, keepH);
       const qty   = sliceByIdx(qtyFull,   keepH);
-      const rev   = sliceByIdx(revFull,   keepH);
 
       const hasW  = sumNumbers(qty) > 0;
       const medW  = hasW ? weightedMean(price, qty) : null;
 
       CH.comercial.data.labels            = LCH;
-      CH.comercial.data.datasets[0].data  = rev; // barras = R$ total
+      CH.comercial.data.datasets[0].data  = price; // linha diária R$/SC
       CH.comercial.data.datasets[1].data  = (medW!=null) ? new Array(LCH.length).fill(medW) : new Array(LCH.length).fill(null); // linha = média ponderada R$/SC
       CH.comercial.update();
       setMetaMoney(document.getElementById('com-meta'), medW);
     }
 
-    // === Comercial ONTEM (ponderado + receita R$ no recorte) ===
+    // === Comercial ONTEM (ponderado + preço diário no recorte) ===
     if (CH.comercialOntem){
       const sel = (window._comercialSelO && window._comercialSelO.length) ? window._comercialSelO : filterVarList(BASE.comVarNames);
 
       const priceFull = weightedDailySeries(BASE.comOntemVarPrice, BASE.comOntemVarQty, sel, BASE.labelsCISO_O.length);
       const qtyFull   = flatQtyForSelection(BASE.comOntemVarQty,   sel, BASE.labelsCISO_O.length);
-      const revFull   = dailyRevenue(BASE.comOntemVarPrice, BASE.comOntemVarQty, sel, BASE.labelsCISO_O.length);
 
       const LCO   = sliceByIdx(BASE.labelsC_O,  keepO);
       const price = sliceByIdx(priceFull, keepO);
       const qty   = sliceByIdx(qtyFull,   keepO);
-      const rev   = sliceByIdx(revFull,   keepO);
 
       const hasW  = sumNumbers(qty) > 0;
       const medW  = hasW ? weightedMean(price, qty) : null;
 
       CH.comercialOntem.data.labels            = LCO;
-      CH.comercialOntem.data.datasets[0].data  = rev; // barras = R$ total
+      CH.comercialOntem.data.datasets[0].data  = price; // linha diária R$/SC
       CH.comercialOntem.data.datasets[1].data  = (medW!=null) ? new Array(LCO.length).fill(medW) : new Array(LCO.length).fill(null);
       CH.comercialOntem.update();
       setMetaMoney(document.getElementById('com-ontem-meta'), medW);
@@ -2653,15 +2629,15 @@ Chart.register(noDataPlugin);
     return typePalette[Math.max(0, idx) % typePalette.length];
   };
 
-// ===== Comercial HOJE (barras = R$ total; linha = média ponderada R$/SC) =====
+// ===== Comercial HOJE (linha diária + média ponderada R$/SC) =====
 (function(){
   const el = document.getElementById('chartComercialMedia');
   if (!el) return;
 
   CH.comercial = new Chart(el, {
     data: { labels: BASE.labelsC_H, datasets: [
-      // Barras: valor total do dia (R$)
-      mkBar('Valor total do dia (R$)', new Array(BASE.labelsC_H.length).fill(null), THEME.g2, 'y1'),
+      // Linha principal: preço diário por caixa (R$/SC)
+      mkLine('Preço diário (R$/SC)', new Array(BASE.labelsC_H.length).fill(null), THEME.g2, 'y', { borderWidth:3 }),
       // Linha tracejada: média ponderada R$/SC (constante no recorte)
       mkLine('Média ponderada (R$/SC)', new Array(BASE.labelsC_H.length).fill(null), THEME.g3, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }),
     ]},
@@ -2671,18 +2647,12 @@ Chart.register(noDataPlugin);
         ...baseOpts(true).plugins,
         tooltip:{ callbacks:{ label:(ctx)=>{
           const v = ctx.parsed.y;
-          if (ctx.dataset.yAxisID === 'y1') {
-            const txt = (v==null?'-':v.toLocaleString('pt-BR',{ minimumFractionDigits:2, maximumFractionDigits:2 }));
-            return `${ctx.dataset.label}: R$ ${txt}`;
-          } else {
-            const txt = (v==null?'-':v.toLocaleString('pt-BR',{ minimumFractionDigits:2, maximumFractionDigits:3 }));
-            return `${ctx.dataset.label}: R$ ${txt}/SC`;
-          }
+          const txt = (v==null?'-':v.toLocaleString('pt-BR',{ minimumFractionDigits:2, maximumFractionDigits:3 }));
+          return `${ctx.dataset.label}: R$ ${txt}/SC`;
         }}}
       },
       scales: {
-        y:  { beginAtZero:true, position:'left',  title:{ display:true, text:'R$/SC' } },
-        y1: { beginAtZero:true, position:'right', title:{ display:true, text:'R$ (total do dia)' }, grid:{ drawOnChartArea:false } }
+        y:  { beginAtZero:true, position:'left',  title:{ display:true, text:'R$/SC' } }
       }
     }
   });
@@ -2699,15 +2669,13 @@ Chart.register(noDataPlugin);
     // séries completas
     const priceFull = weightedDailySeries(BASE.comHojeVarPrice, BASE.comHojeVarQty, sel, BASE.labelsCISO_H.length);
     const qtyFull   = flatQtyForSelection   (BASE.comHojeVarQty,                     sel, BASE.labelsCISO_H.length);
-    const revFull   = dailyRevenue          (BASE.comHojeVarPrice, BASE.comHojeVarQty, sel, BASE.labelsCISO_H.length);
 
     // aplica recorte
     const price = sliceByIdx(priceFull, idx);
     const qty   = sliceByIdx(qtyFull,   idx);
-    const rev   = sliceByIdx(revFull,   idx);
-
-    // atualiza o gráfico (barras = R$ total do dia)
-    CH.comercial.data.datasets[0].data = rev;
+    
+    // atualiza o gráfico com a série diária (R$/SC)
+    CH.comercial.data.datasets[0].data = price;
 
     // média ponderada R$/SC no recorte
     const hasW = sumNumbers(qty) > 0;
@@ -2724,14 +2692,14 @@ Chart.register(noDataPlugin);
 })();
 
   // ===== Comercial ONTEM (inicia ponderado) =====
- // ===== Comercial ONTEM (barras = R$ total; linha = média ponderada R$/SC) =====
+  // ===== Comercial ONTEM (linha diária + média ponderada R$/SC) =====
 (function(){
   const el = document.getElementById('chartComercialOntem');
   if (!el) return;
 
   CH.comercialOntem = new Chart(el, {
     data: { labels: BASE.labelsC_O, datasets: [
-      mkBar('Valor total do dia (R$)', new Array(BASE.labelsC_O.length).fill(null), THEME.g1, 'y1'),
+      mkLine('Preço diário (R$/SC)', new Array(BASE.labelsC_O.length).fill(null), THEME.g1, 'y', { borderWidth:3 }),
       mkLine('Média ponderada (R$/SC)', new Array(BASE.labelsC_O.length).fill(null), THEME.g3, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }),
     ]},
     options: {
@@ -2740,50 +2708,42 @@ Chart.register(noDataPlugin);
         ...baseOpts(true).plugins,
         tooltip:{ callbacks:{ label:(ctx)=>{
           const v = ctx.parsed.y;
-          if (ctx.dataset.yAxisID === 'y1') {
-            const txt = (v==null?'-':v.toLocaleString('pt-BR',{ minimumFractionDigits:2, maximumFractionDigits:2 }));
-            return `${ctx.dataset.label}: R$ ${txt}`;
-          } else {
-            const txt = (v==null?'-':v.toLocaleString('pt-BR',{ minimumFractionDigits:2, maximumFractionDigits:3 }));
-            return `${ctx.dataset.label}: R$ ${txt}/SC`;
-          }
+          const txt = (v==null?'-':v.toLocaleString('pt-BR',{ minimumFractionDigits:2, maximumFractionDigits:3 }));
+          return `${ctx.dataset.label}: R$ ${txt}/SC`;
         }}}
       },
       scales: {
-        y:  { beginAtZero:true, position:'left',  title:{ display:true, text:'R$/SC' } },
-        y1: { beginAtZero:true, position:'right', title:{ display:true, text:'R$ (total do dia)' }, grid:{ drawOnChartArea:false } }
+        y:  { beginAtZero:true, position:'left',  title:{ display:true, text:'R$/SC' } }
       }
     }
   });
 
   const varNames = filterVarList(BASE.comVarNames);
   buildVarPicker('comercialOntemVarPicker', varNames, varNames, (sel) => {
-  window._comercialSelO = sel;
+    window._comercialSelO = sel;
 
-  const idx = (window._keepIdxO && window._keepIdxO.length)
-    ? window._keepIdxO
-    : BASE.labelsCISO_O.map((_, i) => i);
+    const idx = (window._keepIdxO && window._keepIdxO.length)
+      ? window._keepIdxO
+      : BASE.labelsCISO_O.map((_, i) => i);
 
-  const priceFull = weightedDailySeries(BASE.comOntemVarPrice, BASE.comOntemVarQty, sel, BASE.labelsCISO_O.length);
-  const qtyFull   = flatQtyForSelection   (BASE.comOntemVarQty,                     sel, BASE.labelsCISO_O.length);
-  const revFull   = dailyRevenue          (BASE.comOntemVarPrice, BASE.comOntemVarQty, sel, BASE.labelsCISO_O.length);
+    const priceFull = weightedDailySeries(BASE.comOntemVarPrice, BASE.comOntemVarQty, sel, BASE.labelsCISO_O.length);
+    const qtyFull   = flatQtyForSelection   (BASE.comOntemVarQty,                     sel, BASE.labelsCISO_O.length);
 
-  const price = sliceByIdx(priceFull, idx);
-  const qty   = sliceByIdx(qtyFull,   idx);
-  const rev   = sliceByIdx(revFull,   idx);
+    const price = sliceByIdx(priceFull, idx);
+    const qty   = sliceByIdx(qtyFull,   idx);
 
-  CH.comercialOntem.data.datasets[0].data = rev;
+    CH.comercialOntem.data.datasets[0].data = price;
 
-  const hasW = sumNumbers(qty) > 0;
-  const medW = hasW ? weightedMean(price, qty) : null;
+    const hasW = sumNumbers(qty) > 0;
+    const medW = hasW ? weightedMean(price, qty) : null;
 
-  CH.comercialOntem.data.datasets[1].data = (medW != null)
-    ? new Array(CH.comercialOntem.data.labels.length).fill(medW)
-    : new Array(CH.comercialOntem.data.labels.length).fill(null);
+    CH.comercialOntem.data.datasets[1].data = (medW != null)
+      ? new Array(CH.comercialOntem.data.labels.length).fill(medW)
+      : new Array(CH.comercialOntem.data.labels.length).fill(null);
 
-  CH.comercialOntem.update();
-  setMetaMoney(document.getElementById('com-ontem-meta'), medW);
-});
+    CH.comercialOntem.update();
+    setMetaMoney(document.getElementById('com-ontem-meta'), medW);
+  });
 })();
 
   // ===== LOGÍSTICA (2 veículos + média) — HORAS
