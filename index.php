@@ -427,6 +427,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $p_tmd_hhmm = $p_tmc_hhmm = '';
     $p_tmd_min = $p_tmc_min = 0;
     $p_meta_sacos_dia = 0;
+    $p_maquina_parada_hhmm = '';
+    $p_maquina_parada_min = 0;
 
     if ($can['producao']) {
       $allowed_desc = ['carreta_ls','truck'];
@@ -455,6 +457,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $p_tmd_min  = hhmm_to_minutes($p_tmd_hhmm) ?? 0;
       $p_tmc_hhmm = $prefCarg['hhmm'] ?? '';
       $p_tmc_min  = hhmm_to_minutes($p_tmc_hhmm) ?? 0;
+      $raw_maquina_parada = $_POST['p_maquina_parada'] ?? '';
+      $p_maquina_parada_hhmm = preg_replace('/[^0-9:]/', '', (string)$raw_maquina_parada);
+      $maquina_parada_min = hhmm_to_minutes($p_maquina_parada_hhmm);
+      if ($p_maquina_parada_hhmm === '' || $maquina_parada_min === null) {
+        $p_maquina_parada_hhmm = '';
+        $p_maquina_parada_min = 0;
+      } else {
+        $p_maquina_parada_min = $maquina_parada_min;
+      }
       $p_meta_sacos_dia = (float)($_POST['p_meta_sacos_dia'] ?? 0);
     }
 
@@ -576,6 +587,12 @@ if ($can['producao']) {
     'tempo_descarregamento_min'  => $p_tmd_min,
     'tempo_carregamento_hhmm'    => $p_tmc_hhmm,
     'tempo_carregamento_min'     => $p_tmc_min,
+    'maquina_parada_hhmm'        => $p_maquina_parada_hhmm,
+    'maquina_parada_min'         => (int)$p_maquina_parada_min,
+    'maquina_parada' => [
+      'hhmm' => $p_maquina_parada_hhmm,
+      'min'  => (int)$p_maquina_parada_min,
+    ],
     'tmd' => [
       'dia_anterior' => (float)$p_tmd_min,
       'media_geral'  => (float)($_POST['p_tmd_media'] ?? 0)
@@ -668,7 +685,7 @@ try {
   } else {
     $ins = pdo()->prepare('
       INSERT INTO safra_entries (ref_date, payload_json, created_at)
-      VALUES (:ref_date, CAST(:json AS JSON), NOW())
+      VALUES (:ref_date, :json, NOW())
     ');
     $ins->execute([':ref_date'=>$ref_date, ':json'=>$json]);
   }
@@ -749,6 +766,16 @@ $prefill = [
   'p_cargas'    => dot($viewPayload,'producao.carregamento') ?: (function() use ($viewPayload){
       $hh = dot($viewPayload,'producao.tempo_carregamento_hhmm');
       return $hh ? [['tipo'=>'carreta_ls','hhmm'=>$hh,'min'=>hhmm_to_minutes($hh)]] : [];
+  })(),
+  'p_maquina_parada' => (function() use ($viewPayload){
+      $hh = dot($viewPayload,'producao.maquina_parada_hhmm')
+          ?: dot($viewPayload,'producao.maquina_parada.hhmm');
+      if ($hh) return $hh;
+      $min = dot($viewPayload,'producao.maquina_parada_min');
+      if ($min !== null && $min !== '') return minutes_to_hhmm($min);
+      $min = dot($viewPayload,'producao.maquina_parada.min');
+      if ($min !== null && $min !== '') return minutes_to_hhmm($min);
+      return '';
   })(),
 
   // Fazenda — repetidor (novo) com fallback ao legado
@@ -1101,6 +1128,37 @@ foreach ($tabOrder as $t) { if (!empty($can[$t])) { $defaultTab = $t; break; } }
             </div>
             <div id="pCargas" class="space-y-3"></div>
             <input type="hidden" name="p_cargas" id="p_cargas_json" />
+          </div>
+
+                    <!-- Máquina parada -->
+          <div class="grid md:grid-cols-3 gap-6">
+            <div>
+              <?php
+                $vMaqParada = dot($viewPayload,'producao.maquina_parada_hhmm');
+                if (!$vMaqParada) {
+                  $vMaqParada = dot($viewPayload,'producao.maquina_parada.hhmm');
+                }
+                if (!$vMaqParada) {
+                  $vMaqParadaMin = dot($viewPayload,'producao.maquina_parada_min');
+                  if ($vMaqParadaMin !== null && $vMaqParadaMin !== '') {
+                    $vMaqParada = minutes_to_hhmm($vMaqParadaMin);
+                  } else {
+                    $vMaqParadaMin = dot($viewPayload,'producao.maquina_parada.min');
+                    if ($vMaqParadaMin !== null && $vMaqParadaMin !== '') {
+                      $vMaqParada = minutes_to_hhmm($vMaqParadaMin);
+                    }
+                  }
+                }
+                $okMaqParada = has_value($vMaqParada);
+              ?>
+              <label class="block text-sm font-medium text-brand-muted mb-2 flex items-center gap-2">
+                Máquina parada (HH:MM)
+                <?php echo badge($okMaqParada).chip_value($vMaqParada,'num'); ?>
+              </label>
+              <input type="time" step="60" name="p_maquina_parada"
+                     value="<?php echo htmlspecialchars($prefill['p_maquina_parada']); ?>"
+                     class="block w-full h-11 px-4 py-2 bg-white border border-brand-line rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary/30 focus:border-brand-primary" />
+            </div>
           </div>
 
           <!-- Aproveitamento geral (auto) -->

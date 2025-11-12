@@ -137,7 +137,7 @@ $SECTIONS_BY_ROLE = [
   'comercial' => ['secComercial','secComercialOntem'],
   'logistica' => ['secLogistica'],
   'qualidade' => ['secQPelada','secQDefeitos','secQUniform'],
-  'producao'  => ['secProdSacos','secProdCarreg','secProdDesc','secProdAprov','secProdAting','secProdAtingSafra'],
+  'producao'  => ['secProdSacos','secProdCarreg','secProdDesc','secProdParada','secProdAprov','secProdAting','secProdAtingSafra'],
   'fazenda'   => ['secFazCarreg','secFazDesc','secFazPessoas','secFazColhedora','secPie'],
 ];
 $ALL_SECTIONS = array_values(array_unique(array_merge(...array_values($SECTIONS_BY_ROLE))));
@@ -152,6 +152,7 @@ $CAP_BY_SECTION = [
   'secProdSacos'        => ['view',  'dashboard_producao'],
   'secProdCarreg'       => ['view',  'dashboard_producao'],
   'secProdDesc'         => ['view',  'dashboard_producao'],
+  'secProdParada'       => ['view',  'dashboard_producao'],
   'secProdAprov'        => ['view',  'dashboard_producao'],
   'secProdAting'        => ['view',  'dashboard_producao'],
   /* +++ NOVO +++ */
@@ -384,7 +385,7 @@ $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
  * ========================================================================== */
 $metricsOverride = ['q6_dia','q7_dia','q8_dia','p16_dia','p_aprov_dia','f17_dia','f19_dia'];
 $metricsSum      = ['p15_dia'];
-$metricsAvg      = ['l5','p11_dia','p12_dia','f_carr_dia','f_desc_dia'];
+$metricsAvg      = ['l5','p11_dia','p12_dia','p_parada_dia','f_carr_dia','f_desc_dia'];
 
 $byDay = [];
 function hhmm_to_min($txt){
@@ -399,6 +400,42 @@ function any_to_min($maybe){
     return (float)$maybe;
   }
   return hhmm_to_min($maybe);
+}
+
+function minutes_from_payload($value): ?float {
+  if ($value === null) return null;
+
+  if (is_array($value)) {
+    $isList = array_keys($value) === range(0, count($value) - 1);
+
+    if ($isList) {
+      foreach ($value as $item) {
+        $found = minutes_from_payload($item);
+        if ($found !== null) return $found;
+      }
+      return null;
+    }
+
+    $priority = ['min','minutos','minuto','total','total_min','total_minutos','valor','value','dia','dia_anterior','hoje','atual','tempo','tempo_min','tempo_minutos','hhmm','tmc_min','tmc_hhmm','tmd_min','tmd_hhmm'];
+    foreach ($priority as $key) {
+      if (array_key_exists($key, $value)) {
+        $found = minutes_from_payload($value[$key]);
+        if ($found !== null) return $found;
+      }
+    }
+
+    foreach ($value as $v) {
+      $found = minutes_from_payload($v);
+      if ($found !== null) return $found;
+    }
+
+    return null;
+  }
+
+  $num = any_to_min($value);
+  if ($num === null) return null;
+  if ($num < 0) return null;
+  return (float)$num;
 }
 
 /* ===== Helper: converte dinheiro/numero em pt-BR para float ===== */
@@ -443,6 +480,33 @@ foreach ($rows as $r) {
   $d = $r['ref_date'];
   if (!isset($byDay[$d])) $byDay[$d] = ['override'=>[], 'sum'=>[], 'avg'=>[]];
 
+  $payload = json_decode($r['payload_json'] ?? 'null', true) ?: [];
+  $prodSection = is_array($payload['producao'] ?? null) ? $payload['producao'] : [];
+  $downtimeMin = null;
+  if ($prodSection) {
+    $candidates = [
+      $prodSection['maquina_parada']          ?? null,
+      $prodSection['maquina_parada_dia']      ?? null,
+      $prodSection['maquina_parada_min']      ?? null,
+      $prodSection['maquina_parada_hhmm']     ?? null,
+      $prodSection['tempo_maquina_parada']    ?? null,
+      $prodSection['tempo_maquina_parada_dia']?? null,
+      $prodSection['tempo_maquina_parada_min']?? null,
+      $prodSection['tempo_maquina_parada_hhmm']?? null,
+    ];
+    foreach ($prodSection as $key => $val) {
+      if ($downtimeMin !== null) break;
+      if (is_string($key) && mb_stripos($key, 'parad', 0, 'UTF-8') !== false) {
+        $candidates[] = $val;
+      }
+    }
+    foreach ($candidates as $cand) {
+      $found = minutes_from_payload($cand);
+      if ($found !== null) { $downtimeMin = $found; break; }
+    }
+  }
+  $r['p_parada_dia'] = $downtimeMin;
+
   foreach ($metricsOverride as $m) {
     $v = $r[$m];
     if ($v === '' || $v === null || !is_numeric($v)) continue;
@@ -461,8 +525,6 @@ foreach ($rows as $r) {
     $byDay[$d]['avg'][$m]['sum'] += (float)$v;
     $byDay[$d]['avg'][$m]['cnt'] += 1;
   }
-
-  $payload = json_decode($r['payload_json'] ?? 'null', true) ?: [];
 
   // ===== Produção: CARREGAMENTO (bruto por tipo)
   $prodCandidates = [];
@@ -1036,6 +1098,7 @@ $mediaDefeitos=$avgOf($series['q7_dia']);
 $mediaUniform =$avgOf($series['q8_dia']);
 $mediaCarrLegacy  = $avgOf($series['f_carr_dia']);
 $mediaDesc  = $avgOf($series['f_desc_dia']);
+$mediaParada = $avgOf($series['p_parada_dia'] ?? []);
 $mediaAprov = $avgOf($series['p_aprov_dia']);
 
 ksort($fazCarrRawSumPerDay);
@@ -1408,6 +1471,14 @@ $mediaF19 = $avgOf($series['f19_dia']);
         <canvas id="chartProdDesc"></canvas>
       </section>
       <?php endif; ?>
+      
+      <?php if (in_array('secProdParada', $allowedSections, true)): ?>
+      <section id="secProdParada" class="card rounded-xl2 bg-brand-surface p-5">
+        <h2 class="font-semibold mb-1">Produção • Máquina parada (h)</h2>
+        <p id="prod-parada-meta" class="text-xs text-brand-muted mb-3">—</p>
+        <canvas id="chartProdParada"></canvas>
+      </section>
+      <?php endif; ?>
 
       <?php if (in_array('secProdAprov', $allowedSections, true)): ?>
       <section id="secProdAprov" class="card rounded-xl2 bg-brand-surface p-5">
@@ -1581,6 +1652,7 @@ function dailyRevenue(priceMap, qtyMap, varSel, len){
 
   // NOVO: médias gerais (minutos)
   const mediaDesc  = <?php echo json_encode($mediaDesc, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>; // minutos
+  const mediaParada = <?php echo json_encode($mediaParada, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>; // minutos
   const mediaAprov = <?php echo json_encode($mediaAprov, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
 
   const mediaPelada    = <?php echo json_encode($mediaPelada, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
@@ -1675,6 +1747,8 @@ function dailyRevenue(priceMap, qtyMap, varSel, len){
     logDailyMeanSel: [...logDailyMeanSel],
     mediaLogSel: mediaLogSel,
 
+    mediaParada: mediaParada,
+
     // médias diárias (entre tipos) em minutos
     prodCarrDailyMean: [...prodCarrDailyMean],
     prodDescDailyMean: [...prodDescDailyMean],
@@ -1731,6 +1805,7 @@ function dailyRevenue(priceMap, qtyMap, varSel, len){
     {id:'secProdAting',      label:'Atingimento da meta x Sacos/Dia',icon:ico.producao,  role:'producao' },
     {id:'secProdCarreg',     label:'Carregamento por tipo',          icon:ico.producao,  role:'producao'},
     {id:'secProdDesc',       label:'Descarregamento por tipo',       icon:ico.producao,  role:'producao'},
+    {id:'secProdParada',     label:'Máquina parada (h)',             icon:ico.producao,  role:'producao'},
     {id:'secProdAprov',      label:'Aproveitamento (%)',             icon:ico.producao,  role:'producao'},
     {id:'secFazCarreg',      label:'Carregamento por tipo',          icon:ico.fazenda,   role:'fazenda'},
     {id:'secFazPessoas',     label:'Pessoas no Campo',               icon:ico.fazenda,   role:'fazenda'},
@@ -1783,7 +1858,7 @@ function dailyRevenue(priceMap, qtyMap, varSel, len){
   }
 
   // ===== Modal & seleção de seções (inalterado)
-  const CHART_SECS_WITH_TIME = new Set(['secLogistica','secProdCarreg','secProdDesc','secFazCarreg']); // gráficos que exibem horas
+  const CHART_SECS_WITH_TIME = new Set(['secLogistica','secProdCarreg','secProdDesc','secProdParada','secFazCarreg']); // gráficos que exibem horas
 
   const graphsModal = document.getElementById('graphsModal');
   const btnGraphs   = document.getElementById('btnGraphs');
@@ -2087,6 +2162,7 @@ function sumNumbers(arr){
     const mediaDefF   = avgNonNull(Sfil.q7_dia);
     const mediaUniF   = avgNonNull(Sfil.q8_dia);
     const mediaDescF  = avgNonNull(Sfil.f_desc_dia);
+    const mediaParadaF = avgNonNull(Sfil.p_parada_dia);
     const mediaAprovF = avgNonNull(Sfil.p_aprov_dia);
 
     // PRODUÇÃO: médias diárias (entre tipos) re-filtradas — MINUTOS
@@ -2296,6 +2372,15 @@ if (can) {
       CH.prodDesc.data.datasets[idxMean].data = seriesMinToHours(prodDescMeanF_min);
       CH.prodDesc.update();
       setMetaHours('prod-desc-meta', mediaTMDF_min);
+    }
+
+    if (CH.prodParada){
+      CH.prodParada.data.labels = L;
+      CH.prodParada.data.datasets[0].data = seriesMinToHours(Sfil.p_parada_dia || []);
+      const meanHours = mediaParadaF == null ? null : mediaParadaF / 60;
+      CH.prodParada.data.datasets[1].data = new Array(L.length).fill(meanHours);
+      CH.prodParada.update();
+      setMetaHours('prod-parada-meta', mediaParadaF);
     }
 
     // Produção Aproveitamento
@@ -2869,6 +2954,24 @@ Chart.register(noDataPlugin);
     setMetaHours('prod-desc-meta', <?php echo json_encode($mediaTMD_period, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>);
   })();
 
+  // ===== Produção: Máquina parada — HORAS
+  (function(){
+    const el = document.getElementById('chartProdParada');
+    if (!el) return;
+    const mediaHoras = <?php echo json_encode(($mediaParada !== null) ? $mediaParada/60 : null, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+    CH.prodParada = new Chart(el, {
+      data:{
+        labels,
+        datasets:[
+          mkBar('Máquina parada (h)', seriesMinToHours(S.p_parada_dia || []), THEME.red, 'y'),
+          mkLine('Média no período (h)', new Array(labels.length).fill(mediaHoras), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 })
+        ]
+      },
+      options: hoursOpts
+    });
+    setMetaHours('prod-parada-meta', <?php echo json_encode($mediaParada, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>);
+  })();
+
   // ===== Produção: Aproveitamento
   (function(){
     setMetaPercent('prod-aprov-meta', <?php echo json_encode($mediaAprov, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>);
@@ -3061,6 +3164,7 @@ Chart.register(noDataPlugin);
   setMetaHours('log-meta', BASE.mediaLogSel);
   setMetaHours('prod-carr-meta', <?php echo json_encode($mediaTMC_period, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>);
   setMetaHours('prod-desc-meta', <?php echo json_encode($mediaTMD_period, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>);
+  setMetaHours('prod-parada-meta', <?php echo json_encode($mediaParada, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>);
   // Fazenda carregamento é setado no bloco do chart após calcular média diária
 </script>
 </body>
