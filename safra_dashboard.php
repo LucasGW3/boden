@@ -750,6 +750,9 @@ $cStmt->execute($cParams ?: []);
 /* mapas por dia */
 $comHojeByDate  = []; // [Y-m-d] => ['sum'=>..., 'cnt'=>...]
 $comOntemByDate = [];
+$comHojeByBox   = []; // [Caixa][Y-m-d] => ['sum'=>..., 'cnt'=>...]
+$comOntemByBox  = [];
+$comBoxSet      = [];
 
 while ($row = $cStmt->fetch(PDO::FETCH_ASSOC)) {
   $d = $row['ref_date'];
@@ -770,6 +773,19 @@ while ($row = $cStmt->fetch(PDO::FETCH_ASSOC)) {
   foreach ($vendas as $v) {
     if (!is_array($v)) continue;
 
+        $caixaRaw = $v['caixa']
+      ?? $v['caixa_nome']
+      ?? $v['tipo_caixa']
+      ?? $v['caixa_tipo']
+      ?? $v['tipo']
+      ?? null;
+    if (is_array($caixaRaw)) {
+      $caixaRaw = $caixaRaw['nome'] ?? $caixaRaw['label'] ?? null;
+    }
+    $caixa = trim((string)$caixaRaw);
+    if ($caixa === '') $caixa = 'Caixa';
+    $comBoxSet[$caixa] = true;
+
     // ----- valores de HOJE (qualquer uma das chaves abaixo)
     $candidatosHoje = [
       $v['preco']        ?? null,
@@ -782,6 +798,11 @@ while ($row = $cStmt->fetch(PDO::FETCH_ASSOC)) {
       if ($num !== null && $num > 0) {
         $comHojeByDate[$d]['sum'] += $num;
         $comHojeByDate[$d]['cnt'] += 1;
+         if (!isset($comHojeByBox[$caixa])) $comHojeByBox[$caixa] = [];
+        if (!isset($comHojeByBox[$caixa][$d])) $comHojeByBox[$caixa][$d] = ['sum' => 0.0, 'cnt' => 0];
+        $comHojeByBox[$caixa][$d]['sum'] += $num;
+        $comHojeByBox[$caixa][$d]['cnt'] += 1;
+
         break; // considera uma por item
       }
     }
@@ -797,6 +818,12 @@ while ($row = $cStmt->fetch(PDO::FETCH_ASSOC)) {
       if ($num !== null && $num > 0) {
         $comOntemByDate[$d]['sum'] += $num;
         $comOntemByDate[$d]['cnt'] += 1;
+
+        if (!isset($comOntemByBox[$caixa])) $comOntemByBox[$caixa] = [];
+        if (!isset($comOntemByBox[$caixa][$d])) $comOntemByBox[$caixa][$d] = ['sum' => 0.0, 'cnt' => 0];
+        $comOntemByBox[$caixa][$d]['sum'] += $num;
+        $comOntemByBox[$caixa][$d]['cnt'] += 1;
+
         break;
       }
     }
@@ -834,134 +861,27 @@ $mediaPeriodoSC_O = $totalCntO>0 ? round($totalSumO/$totalCntO, 3) : null;
 $labelsCISO_H = array_keys($comHojeByDate);
 $labelsCISO_O = array_keys($comOntemByDate);
 
-/* === Comercial por Variedade via VIEWS (Hoje/Ontem) === */
+$comBoxNames = array_keys($comBoxSet);
+natcasesort($comBoxNames);
+$comBoxNames = array_values($comBoxNames);
 
-/* 1) Variedades disponíveis no período/unidade */
-$sqlVar = "
-  SELECT DISTINCT vp.variedade
-  FROM v_precos_comercial_var_ponderado vp
-  WHERE vp.ref_date BETWEEN :from AND :to
-    AND (
-      :u1 = '' OR EXISTS (
-        SELECT 1
-          FROM v_comercial_vendas cv
-         WHERE cv.ref_date  = vp.ref_date
-           AND cv.variedade = vp.variedade
-           AND cv.unidade   = :u2
-      )
-    )
-  ORDER BY vp.variedade
-";
-$stVar = pdo()->prepare($sqlVar);
-$stVar->execute([
-  ':from' => $from->format('Y-m-d'),
-  ':to'   => $to->format('Y-m-d'),
-  ':u1'   => $unidade,
-  ':u2'   => $unidade,
-]);
-$comVarNames = $stVar->fetchAll(PDO::FETCH_COLUMN) ?: [];
-
-/* 2) Índices por data (já vieram dos blocos HOJE/ONTEM) */
-$idxByDateH = array_flip($labelsCISO_H); // HOJE
-$idxByDateO = array_flip($labelsCISO_O); // ONTEM
-
-/* 3) Pesos (SC) por dia e variedade — romaneio */
-$sqlW = "
-  SELECT
-    p.ref_date,
-    p.variedade,
-    SUM(p.peso_sc) AS sc
-  FROM v_romaneio_var_caixa_peso p
-  JOIN v_comercial_vendas cv
-    ON  cv.ref_date  = p.ref_date
-    AND cv.variedade = p.variedade
-    AND cv.caixa     = p.caixa
-  WHERE p.ref_date >= :from AND p.ref_date < DATE_ADD(:to, INTERVAL 1 DAY)
-    AND (:u1 = '' OR cv.unidade = :u2)
-  GROUP BY p.ref_date, p.variedade
-";
-$stW = pdo()->prepare($sqlW);
-$stW->execute([
-  ':from' => $from->format('Y-m-d'),
-  ':to'   => $to->format('Y-m-d'),
-  ':u1'   => $unidade,
-  ':u2'   => $unidade,
-]);
-
-/* 4) Preços HOJE (média por dia/variedade) */
-$sqlPH = "
-  SELECT vp.ref_date, vp.variedade, vp.preco_ponderado_sc AS preco
-  FROM v_precos_comercial_var_ponderado vp
-  WHERE vp.ref_date BETWEEN :from AND :to
-    AND vp.preco_ponderado_sc IS NOT NULL
-    AND (
-      :u1 = '' OR EXISTS (
-        SELECT 1
-          FROM v_comercial_vendas cv
-         WHERE cv.ref_date  = vp.ref_date
-           AND cv.variedade = vp.variedade
-           AND cv.unidade   = :u2
-      )
-    )
-";
-$stPH = pdo()->prepare($sqlPH);
-$stPH->execute([
-  ':from' => $from->format('Y-m-d'),
-  ':to'   => $to->format('Y-m-d'),
-  ':u1'   => $unidade,
-  ':u2'   => $unidade,
-]);
-
-/* 5) Preços ONTEM (ponderado por caixa, inlinee) */
-$sqlPO = "
-  SELECT
-    p.ref_date,
-    p.variedade,
-    CASE WHEN SUM(p.peso_sc) > 0
-         THEN SUM(p.peso_sc * cv.preco_ontem) / SUM(p.peso_sc)
-         ELSE NULL
-    END AS preco
-  FROM v_romaneio_var_caixa_peso p
-  JOIN v_comercial_vendas cv
-    ON  cv.ref_date  = p.ref_date
-    AND cv.variedade = p.variedade
-    AND cv.caixa     = p.caixa
-  WHERE p.ref_date >= :from AND p.ref_date < DATE_ADD(:to, INTERVAL 1 DAY)
-    AND (:u1 = '' OR cv.unidade = :u2)
-    AND cv.preco_ontem IS NOT NULL
-  GROUP BY p.ref_date, p.variedade
-";
-$stPO = pdo()->prepare($sqlPO);
-$stPO->execute([
-  ':from' => $from->format('Y-m-d'),
-  ':to'   => $to->format('Y-m-d'),
-  ':u1'   => $unidade,
-  ':u2'   => $unidade,
-]);
-
-/* 6) Inicializa arrays alinhados às datas HOJE/ONTEM */
-$lenH = count($labelsCISO_H);
-$lenO = count($labelsCISO_O);
-$comHojeVarPrice  = [];
-$comHojeVarQty    = [];
-$comOntemVarPrice = [];
-$comOntemVarQty   = [];
-
-foreach ($comVarNames as $vn) {
-  $comHojeVarPrice[$vn]  = array_fill(0, $lenH, null);
-  $comHojeVarQty[$vn]    = array_fill(0, $lenH, 0.0);
-  $comOntemVarPrice[$vn] = array_fill(0, $lenO, null);
-  $comOntemVarQty[$vn]   = array_fill(0, $lenO, 0.0);
-}
-
-/* 7) Preenche preços HOJE */
-while ($r = $stPH->fetch(PDO::FETCH_ASSOC)) {
-  $d  = $r['ref_date'];
-  $vn = (string)$r['variedade'];
-  $pr = is_numeric($r['preco']) ? (float)$r['preco'] : null;
-  if ($pr === null || !isset($idxByDateH[$d]) || !isset($comHojeVarPrice[$vn])) continue;
-  $i = $idxByDateH[$d];
-  $comHojeVarPrice[$vn][$i] = $pr;
+$comHojeBoxSeries = [];
+$comHojeBoxCount  = [];
+foreach ($comBoxNames as $boxName) {
+  $series = [];
+  $counts = [];
+  foreach ($labelsCISO_H as $dateYmd) {
+    $vals = $comHojeByBox[$boxName][$dateYmd] ?? null;
+    if ($vals && $vals['cnt'] > 0) {
+      $series[] = round($vals['sum'] / $vals['cnt'], 3);
+      $counts[] = (int)$vals['cnt'];
+    } else {
+      $series[] = null;
+      $counts[] = 0;
+    }
+  }
+  $comHojeBoxSeries[$boxName] = $series;
+  $comHojeBoxCount[$boxName]  = $counts;
 }
 
 /* 8) Preenche preços ONTEM */
@@ -974,24 +894,24 @@ while ($r = $stPO->fetch(PDO::FETCH_ASSOC)) {
   $comOntemVarPrice[$vn][$i] = $pr;
 }
 
-/* 9) Preenche PESOS (SC) — valem para Hoje e Ontem (mesmo dia) */
-while ($r = $stW->fetch(PDO::FETCH_ASSOC)) {
-  $d  = $r['ref_date'];
-  $vn = (string)$r['variedade'];
-  $sc = is_numeric($r['sc']) ? (float)$r['sc'] : 0.0;
-  if ($sc <= 0) continue;
-
-  if (isset($idxByDateH[$d]) && isset($comHojeVarQty[$vn])) {
-    $comHojeVarQty[$vn][$idxByDateH[$d]] += $sc;
+$comOntemBoxSeries = [];
+$comOntemBoxCount  = [];
+foreach ($comBoxNames as $boxName) {
+  $series = [];
+  $counts = [];
+  foreach ($labelsCISO_O as $dateYmd) {
+    $vals = $comOntemByBox[$boxName][$dateYmd] ?? null;
+    if ($vals && $vals['cnt'] > 0) {
+      $series[] = round($vals['sum'] / $vals['cnt'], 3);
+      $counts[] = (int)$vals['cnt'];
+    } else {
+      $series[] = null;
+      $counts[] = 0;
+    }
   }
-  if (isset($idxByDateO[$d]) && isset($comOntemVarQty[$vn])) {
-    $comOntemVarQty[$vn][$idxByDateO[$d]] += $sc;
-  }
+  $comOntemBoxSeries[$boxName] = $series;
+  $comOntemBoxCount[$boxName]  = $counts;
 }
-
-/* 10) Ordena nomes de variedade como antes */
-natcasesort($comVarNames);
-$comVarNames = array_values($comVarNames);
 
 /* =============================================================================
  * 8) F18 — Big bag por Variedade (LINHAS por dia)
@@ -1580,20 +1500,6 @@ $mediaF19 = $avgOf($series['f19_dia']);
 
 <script>
 
-  // === Helpers globais (HOISTED) ===
-// Defina só uma vez no arquivo, no topo do <script>
-window.EXCLUDE_VARS = new Set(['Refugo','Resíduo','Residuo','Refugo/Resíduo']);
-
-function filterVarList(names){
-  names = names || [];
-  const out = [];
-  for (let i = 0; i < names.length; i++){
-    const v = (names[i] || '').trim();
-    if (!window.EXCLUDE_VARS.has(v)) out.push(v);
-  }
-  return out;
-}
-
   const THEME = { g1:'#9DBF21', g2:'#56A632', g3:'#63AA35', soft:'#cfe87a', red:'#EA0004', yellow:'#FFC107', text:'#1e1e1e' };
 
   document.getElementById('btnFull')?.addEventListener('click',()=>{
@@ -1617,12 +1523,12 @@ function filterVarList(names){
   const mediaSC_O   = <?php echo json_encode($mediaPeriodoSC_O, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const labelsCISO_O = <?php echo json_encode($labelsCISO_O, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
 
-  // ===== NOVO: Comercial ponderado por variedade =====
-  const comVarNames      = <?php echo json_encode($comVarNames, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const comHojeVarPrice  = <?php echo json_encode($comHojeVarPrice, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const comHojeVarQty    = <?php echo json_encode($comHojeVarQty, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const comOntemVarPrice = <?php echo json_encode($comOntemVarPrice, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const comOntemVarQty   = <?php echo json_encode($comOntemVarQty, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  // Comercial por caixa (series e contagens)
+  const comBoxNames       = <?php echo json_encode($comBoxNames, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const comHojeBoxSeries  = <?php echo json_encode($comHojeBoxSeries, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const comHojeBoxCount   = <?php echo json_encode($comHojeBoxCount, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const comOntemBoxSeries = <?php echo json_encode($comOntemBoxSeries, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const comOntemBoxCount  = <?php echo json_encode($comOntemBoxCount, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
 
   // ===== NOVO F18 (linhas)
   const f18VarNames     = <?php echo json_encode($f18VarNames, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
@@ -1706,12 +1612,12 @@ function filterVarList(names){
     avgPerSC_O: [...avgPerSC_O],
     mediaSC_O: mediaSC_O,
 
-    // NOVO: Comercial ponderado por variedade
-    comVarNames: [...(comVarNames || [])],
-    comHojeVarPrice: JSON.parse(JSON.stringify(comHojeVarPrice || {})),
-    comHojeVarQty:   JSON.parse(JSON.stringify(comHojeVarQty   || {})),
-    comOntemVarPrice: JSON.parse(JSON.stringify(comOntemVarPrice || {})),
-    comOntemVarQty:   JSON.parse(JSON.stringify(comOntemVarQty   || {})),
+    // Comercial por caixa
+    comBoxNames: [...(comBoxNames || [])],
+    comHojeBoxSeries: JSON.parse(JSON.stringify(comHojeBoxSeries || {})),
+    comHojeBoxCount:  JSON.parse(JSON.stringify(comHojeBoxCount  || {})),
+    comOntemBoxSeries: JSON.parse(JSON.stringify(comOntemBoxSeries || {})),
+    comOntemBoxCount:  JSON.parse(JSON.stringify(comOntemBoxCount  || {})),
 
     typesProd: [...typesProd],
     typesProdDesc: [...typesProdDesc],
@@ -2036,23 +1942,30 @@ function avgNonNull(arr){
   return c ? (s / c) : null;
 }
 
-// ======== (NOVO) Helpers ponderados Comercial =========
-function weightedDailySeries(priceMap, qtyMap, varSel, len){
-  const out = new Array(len).fill(null);
-  for (let i=0;i<len;i++){
-    let ws=0, wq=0;
-    for (const v of varSel){
-      const pArr = priceMap[v] || [];
-      const qArr = qtyMap[v] || [];
-      const p = pArr[i]; const q = qArr[i];
-      if (p != null && !Number.isNaN(p) && Number(p) > 0 && q != null && !Number.isNaN(q) && Number(q) > 0){
-        ws += Number(p) * Number(q);
-        wq += Number(q);
-      }
+// ======== Helpers Comercial por caixa =========
+function combineBoxSeries(seriesMap, countMap, selectedBoxes, len){
+  const boxes = (selectedBoxes && selectedBoxes.length)
+    ? selectedBoxes
+    : Object.keys(seriesMap || {});
+  const sum = new Array(len).fill(0);
+  const weights = new Array(len).fill(0);
+  for (const box of boxes){
+    const serie = seriesMap?.[box] || [];
+    const counts = countMap?.[box] || [];
+    for (let i=0;i<len;i++){
+      const v = serie[i];
+      const c = counts[i];
+      if (v == null || Number.isNaN(v)) continue;
+      const cNum = Number(c);
+      if (Number.isNaN(cNum) || cNum <= 0) continue;
+      const vNum = Number(v);
+      if (Number.isNaN(vNum)) continue;
+      sum[i] += vNum * cNum;
+      weights[i] += cNum;
     }
-    out[i] = (wq > 0) ? (ws / wq) : null;
   }
-  return out;
+  const out = sum.map((s, i) => weights[i] > 0 ? (s / weights[i]) : null);
+  return { series: out, weights };
 }
 function weightedMean(series, weights){
   let ws=0, wq=0;
@@ -2064,17 +1977,6 @@ function weightedMean(series, weights){
     }
   }
   return (wq>0) ? (ws / wq) : null;
-}
-function flatQtyForSelection(qtyMap, varSel, len){
-  const out = new Array(len).fill(0);
-  for (const v of varSel){
-    const arr = qtyMap[v] || [];
-    for (let i=0;i<len;i++){
-      const q = arr[i];
-      if (q != null && !Number.isNaN(q) && Number(q) > 0) out[i] += Number(q);
-    }
-  }
-  return out;
 }
 function buildVarPicker(containerId, varNames, initialSel, onChange){
   const el = document.getElementById(containerId);
@@ -2231,46 +2133,71 @@ if (can) {
   can._chartInstance = g;
 }
 
-    // === Comercial HOJE (ponderado + preço diário no recorte) ===
+    // === Comercial HOJE (linhas por caixa) ===
     if (CH.comercial){
-      const sel = (window._comercialSelH && window._comercialSelH.length) ? window._comercialSelH : filterVarList(BASE.comVarNames);
+      const boxNames = BASE.comBoxNames || [];
+      const sel = (window._comercialSelH && window._comercialSelH.length) ? window._comercialSelH : boxNames;
 
-      // Séries completas
-      const priceFull = weightedDailySeries(BASE.comHojeVarPrice, BASE.comHojeVarQty, sel, BASE.labelsCISO_H.length); // R$/SC
-      const qtyFull   = flatQtyForSelection(BASE.comHojeVarQty,   sel, BASE.labelsCISO_H.length);                      // SC
+      const LCH = sliceByIdx(BASE.labelsC_H, keepH);
+      CH.comercial.data.labels = LCH;
 
-      // Recorte
-      const LCH   = sliceByIdx(BASE.labelsC_H,  keepH);
-      const price = sliceByIdx(priceFull, keepH);
-      const qty   = sliceByIdx(qtyFull,   keepH);
+      const selSet = new Set(sel);
+      for (let i=0;i<boxNames.length;i++){
+        const box = boxNames[i];
+        const serieFull = BASE.comHojeBoxSeries?.[box] || [];
+        const data = sliceByIdx(serieFull, keepH);
+        const dataset = CH.comercial.data.datasets[i];
+        dataset.data = data;
+        dataset.hidden = !selSet.has(box);
+        dataset.label = box;
+        dataset.borderColor = colorForCaixa(box);
+      }
+
+      const { series: combinedFull, weights: weightsFull } = combineBoxSeries(BASE.comHojeBoxSeries, BASE.comHojeBoxCount, sel, BASE.labelsC_H.length);
+      const price = sliceByIdx(combinedFull, keepH);
+      const qty   = sliceByIdx(weightsFull,  keepH);
 
       const hasW  = sumNumbers(qty) > 0;
       const medW  = hasW ? weightedMean(price, qty) : null;
 
-      CH.comercial.data.labels            = LCH;
-      CH.comercial.data.datasets[0].data  = price; // linha diária R$/SC
-      CH.comercial.data.datasets[1].data  = (medW!=null) ? new Array(LCH.length).fill(medW) : new Array(LCH.length).fill(null); // linha = média ponderada R$/SC
+      const meanDataset = CH.comercial.data.datasets[boxNames.length];
+      meanDataset.data = (medW!=null) ? new Array(LCH.length).fill(medW) : new Array(LCH.length).fill(null);
+      meanDataset.hidden = false;
+
       CH.comercial.update();
       setMetaMoney(document.getElementById('com-meta'), medW);
     }
 
-    // === Comercial ONTEM (ponderado + preço diário no recorte) ===
+    // === Comercial ONTEM (linhas por caixa) ===
     if (CH.comercialOntem){
-      const sel = (window._comercialSelO && window._comercialSelO.length) ? window._comercialSelO : filterVarList(BASE.comVarNames);
+            const boxNames = BASE.comBoxNames || [];
+      const sel = (window._comercialSelO && window._comercialSelO.length) ? window._comercialSelO : boxNames;
 
-      const priceFull = weightedDailySeries(BASE.comOntemVarPrice, BASE.comOntemVarQty, sel, BASE.labelsCISO_O.length);
-      const qtyFull   = flatQtyForSelection(BASE.comOntemVarQty,   sel, BASE.labelsCISO_O.length);
+      const LCO = sliceByIdx(BASE.labelsC_O, keepO);
+      CH.comercialOntem.data.labels = LCO;
 
-      const LCO   = sliceByIdx(BASE.labelsC_O,  keepO);
-      const price = sliceByIdx(priceFull, keepO);
-      const qty   = sliceByIdx(qtyFull,   keepO);
+      const selSet = new Set(sel);
+      for (let i=0;i<boxNames.length;i++){
+        const box = boxNames[i];
+        const serieFull = BASE.comOntemBoxSeries?.[box] || [];
+        const data = sliceByIdx(serieFull, keepO);
+        const dataset = CH.comercialOntem.data.datasets[i];
+        dataset.data = data;
+        dataset.hidden = !selSet.has(box);
+        dataset.label = box;
+        dataset.borderColor = colorForCaixa(box);
+      }
+
+      const { series: combinedFull, weights: weightsFull } = combineBoxSeries(BASE.comOntemBoxSeries, BASE.comOntemBoxCount, sel, BASE.labelsC_O.length);
+      const price = sliceByIdx(combinedFull, keepO);
+      const qty   = sliceByIdx(weightsFull,  keepO);
 
       const hasW  = sumNumbers(qty) > 0;
       const medW  = hasW ? weightedMean(price, qty) : null;
 
-      CH.comercialOntem.data.labels            = LCO;
-      CH.comercialOntem.data.datasets[0].data  = price; // linha diária R$/SC
-      CH.comercialOntem.data.datasets[1].data  = (medW!=null) ? new Array(LCO.length).fill(medW) : new Array(LCO.length).fill(null);
+      const meanDataset = CH.comercialOntem.data.datasets[boxNames.length];
+      meanDataset.data = (medW!=null) ? new Array(LCO.length).fill(medW) : new Array(LCO.length).fill(null);
+      meanDataset.hidden = false;
       CH.comercialOntem.update();
       setMetaMoney(document.getElementById('com-ontem-meta'), medW);
     }
@@ -2628,19 +2555,24 @@ Chart.register(noDataPlugin);
     const idx = (BASE.f18VarNames || []).indexOf(name);
     return typePalette[Math.max(0, idx) % typePalette.length];
   };
+    const colorForCaixa = (name) => {
+    const idx = (comBoxNames || []).indexOf(name);
+    return typePalette[Math.max(0, idx) % typePalette.length];
+  };
 
-// ===== Comercial HOJE (linha diária + média ponderada R$/SC) =====
+// ===== Comercial HOJE (linha diária por caixa + média do recorte) =====
 (function(){
   const el = document.getElementById('chartComercialMedia');
   if (!el) return;
 
+    const boxNames = BASE.comBoxNames || [];
+  const datasets = boxNames.map(box => (
+    { ...mkLine(box, new Array(BASE.labelsC_H.length).fill(null), colorForCaixa(box), 'y', { borderWidth:3 }) }
+  ));
+  datasets.push(mkLine('Média selecionada (R$/SC)', new Array(BASE.labelsC_H.length).fill(null), THEME.g3, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }));
+
   CH.comercial = new Chart(el, {
-    data: { labels: BASE.labelsC_H, datasets: [
-      // Linha principal: preço diário por caixa (R$/SC)
-      mkLine('Preço diário (R$/SC)', new Array(BASE.labelsC_H.length).fill(null), THEME.g2, 'y', { borderWidth:3 }),
-      // Linha tracejada: média ponderada R$/SC (constante no recorte)
-      mkLine('Média ponderada (R$/SC)', new Array(BASE.labelsC_H.length).fill(null), THEME.g3, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }),
-    ]},
+    data: { labels: BASE.labelsC_H, datasets },
     options: {
       ...baseOpts(true),
       plugins:{
@@ -2657,37 +2589,45 @@ Chart.register(noDataPlugin);
     }
   });
 
-  // Seletor e cálculo inicial (já ignorando Refugo/Resíduo)
-  const varNames = filterVarList(BASE.comVarNames);
-  buildVarPicker('comercialVarPicker', varNames, varNames, (sel) => {
-    window._comercialSelH = sel;
+  // Seletor e cálculo inicial por caixa
+  buildVarPicker('comercialVarPicker', boxNames, boxNames, (sel) => {
+    const selected = (sel && sel.length) ? sel : boxNames;
+    window._comercialSelH = selected;
 
     const idx = (window._keepIdxH && window._keepIdxH.length)
       ? window._keepIdxH
       : BASE.labelsCISO_H.map((_, i) => i);
 
-    // séries completas
-    const priceFull = weightedDailySeries(BASE.comHojeVarPrice, BASE.comHojeVarQty, sel, BASE.labelsCISO_H.length);
-    const qtyFull   = flatQtyForSelection   (BASE.comHojeVarQty,                     sel, BASE.labelsCISO_H.length);
+    const labels = sliceByIdx(BASE.labelsC_H, idx);
+    CH.comercial.data.labels = labels;
 
-    // aplica recorte
-    const price = sliceByIdx(priceFull, idx);
-    const qty   = sliceByIdx(qtyFull,   idx);
-    
-    // atualiza o gráfico com a série diária (R$/SC)
-    CH.comercial.data.datasets[0].data = price;
+    const selSet = new Set(selected);
+    for (let i=0;i<boxNames.length;i++){
+      const box = boxNames[i];
+      const serieFull = BASE.comHojeBoxSeries?.[box] || [];
+      const data = sliceByIdx(serieFull, idx);
+      const dataset = CH.comercial.data.datasets[i];
+      dataset.data = data;
+      dataset.hidden = !selSet.has(box);
+      dataset.label = box;
+      dataset.borderColor = colorForCaixa(box);
+    }
 
-    // média ponderada R$/SC no recorte
-    const hasW = sumNumbers(qty) > 0;
-    const medW = hasW ? weightedMean(price, qty) : null;
+    const { series: combinedFull, weights: weightsFull } = combineBoxSeries(BASE.comHojeBoxSeries, BASE.comHojeBoxCount, selected, BASE.labelsC_H.length);
+    const combined = sliceByIdx(combinedFull, idx);
+    const weights  = sliceByIdx(weightsFull,  idx);
 
-    // linha horizontal constante com a média do recorte (mesmo número de pontos que o gráfico já tem)
-    CH.comercial.data.datasets[1].data = (medW != null)
-      ? new Array(CH.comercial.data.labels.length).fill(medW)
-      : new Array(CH.comercial.data.labels.length).fill(null);
+    const hasW = sumNumbers(weights) > 0;
+    const medW = hasW ? weightedMean(combined, weights) : null;
+
+    const meanDataset = CH.comercial.data.datasets[boxNames.length];
+    meanDataset.data = (medW != null)
+      ? new Array(labels.length).fill(medW)
+      : new Array(labels.length).fill(null);
+    meanDataset.hidden = false;
 
     CH.comercial.update();
-    setMetaMoney(document.getElementById('com-meta'), medW); // mostra a média do recorte (sem fallback)
+    setMetaMoney(document.getElementById('com-meta'), medW);
   });
 })();
 
@@ -2697,11 +2637,14 @@ Chart.register(noDataPlugin);
   const el = document.getElementById('chartComercialOntem');
   if (!el) return;
 
+  const boxNames = BASE.comBoxNames || [];
+  const datasets = boxNames.map(box => (
+    { ...mkLine(box, new Array(BASE.labelsC_O.length).fill(null), colorForCaixa(box), 'y', { borderWidth:3 }) }
+  ));
+  datasets.push(mkLine('Média selecionada (R$/SC)', new Array(BASE.labelsC_O.length).fill(null), THEME.g3, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }));
+
   CH.comercialOntem = new Chart(el, {
-    data: { labels: BASE.labelsC_O, datasets: [
-      mkLine('Preço diário (R$/SC)', new Array(BASE.labelsC_O.length).fill(null), THEME.g1, 'y', { borderWidth:3 }),
-      mkLine('Média ponderada (R$/SC)', new Array(BASE.labelsC_O.length).fill(null), THEME.g3, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }),
-    ]},
+    data: { labels: BASE.labelsC_O, datasets },
     options: {
       ...baseOpts(true),
       plugins:{
@@ -2718,28 +2661,42 @@ Chart.register(noDataPlugin);
     }
   });
 
-  const varNames = filterVarList(BASE.comVarNames);
-  buildVarPicker('comercialOntemVarPicker', varNames, varNames, (sel) => {
-    window._comercialSelO = sel;
+  // Seletor e cálculo inicial por caixa (Ontem)
+  buildVarPicker('comercialOntemVarPicker', boxNames, boxNames, (sel) => {
+    const selected = (sel && sel.length) ? sel : boxNames;
+    window._comercialSelO = selected;
 
     const idx = (window._keepIdxO && window._keepIdxO.length)
       ? window._keepIdxO
       : BASE.labelsCISO_O.map((_, i) => i);
 
-    const priceFull = weightedDailySeries(BASE.comOntemVarPrice, BASE.comOntemVarQty, sel, BASE.labelsCISO_O.length);
-    const qtyFull   = flatQtyForSelection   (BASE.comOntemVarQty,                     sel, BASE.labelsCISO_O.length);
+    const labels = sliceByIdx(BASE.labelsC_O, idx);
+    CH.comercialOntem.data.labels = labels;
 
-    const price = sliceByIdx(priceFull, idx);
-    const qty   = sliceByIdx(qtyFull,   idx);
+    const selSet = new Set(selected);
+    for (let i=0;i<boxNames.length;i++){
+      const box = boxNames[i];
+      const serieFull = BASE.comOntemBoxSeries?.[box] || [];
+      const data = sliceByIdx(serieFull, idx);
+      const dataset = CH.comercialOntem.data.datasets[i];
+      dataset.data = data;
+      dataset.hidden = !selSet.has(box);
+      dataset.label = box;
+      dataset.borderColor = colorForCaixa(box);
+    }
 
-    CH.comercialOntem.data.datasets[0].data = price;
+    const { series: combinedFull, weights: weightsFull } = combineBoxSeries(BASE.comOntemBoxSeries, BASE.comOntemBoxCount, selected, BASE.labelsC_O.length);
+    const combined = sliceByIdx(combinedFull, idx);
+    const weights  = sliceByIdx(weightsFull,  idx);
 
-    const hasW = sumNumbers(qty) > 0;
-    const medW = hasW ? weightedMean(price, qty) : null;
+    const hasW = sumNumbers(weights) > 0;
+    const medW = hasW ? weightedMean(combined, weights) : null;
 
-    CH.comercialOntem.data.datasets[1].data = (medW != null)
-      ? new Array(CH.comercialOntem.data.labels.length).fill(medW)
-      : new Array(CH.comercialOntem.data.labels.length).fill(null);
+    const meanDataset = CH.comercialOntem.data.datasets[boxNames.length];
+    meanDataset.data = (medW != null)
+      ? new Array(labels.length).fill(medW)
+      : new Array(labels.length).fill(null);
+    meanDataset.hidden = false;
 
     CH.comercialOntem.update();
     setMetaMoney(document.getElementById('com-ontem-meta'), medW);
