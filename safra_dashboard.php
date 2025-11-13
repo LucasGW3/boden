@@ -1331,8 +1331,44 @@ $mediaF19 = $avgOf($series['f19_dia']);
     @media (max-width:420px){ #gridCharts{ grid-template-columns:1fr; } }
     .badge{ font-size:12px; line-height:1; padding:.3rem .5rem; border-radius:9999px; }
 
-    .modal-overlay{ position:fixed; inset:0; background:rgba(17,24,39,.45); -webkit-backdrop-filter:blur(10px); backdrop-filter:blur(10px); z-index:50; }
-    .modal-card{ width:98vw; max-width:1680px; max-height:96vh; }
+    #graphsModal{
+      position:fixed;
+      inset:0;
+      z-index:2000;
+      display:none;
+      align-items:stretch;
+      justify-content:stretch;
+    }
+    #graphsModal:not(.hidden){ display:flex; }
+    .modal-overlay{
+      position:absolute;
+      inset:0;
+      background:rgba(17,24,39,.45);
+      -webkit-backdrop-filter:blur(10px);
+      backdrop-filter:blur(10px);
+      z-index:0;
+    }
+    .modal-shell{
+      position:relative;
+      z-index:1;
+      width:100%;
+      min-height:100%;
+      display:flex;
+      align-items:flex-start;
+      justify-content:center;
+      padding:1.5rem 1rem;
+      overflow:auto;
+    }
+    .modal-card{
+      width:min(1500px, calc(100vw - 2rem));
+      max-width:1680px;
+      max-height:calc(100vh - 3rem);
+      overflow:auto;
+    }
+    @media (max-width:640px){
+      .modal-shell{ padding:1rem; }
+      .modal-card{ width:100%; max-height:calc(100vh - 2rem); }
+    }
     .sel-tile{ border:1px solid #E5F2DE; border-radius:12px; padding:18px; display:flex; gap:14px; align-items:center; background:#fff; cursor:pointer; position:relative; transition: box-shadow .15s, border-color .15s, background .15s, transform .12s; }
     .sel-tile:hover{ box-shadow:0 6px 22px rgba(60,143,40,.10); transform:translateY(-1px); }
     .sel-ico{ width:34px; height:34px; display:grid; place-items:center; }
@@ -1348,10 +1384,11 @@ $mediaF19 = $avgOf($series['f19_dia']);
       gap: 10px;
       max-height: 70vh;
       overflow-y: auto;
-      overflow-x: auto;
+      overflow-x: hidden;
       padding-right: .25rem;
       padding-bottom: .25rem;
       scroll-behavior: smooth;
+      width: 100%;
     }
 
     .role-col{
@@ -1627,9 +1664,9 @@ $mediaF19 = $avgOf($series['f19_dia']);
   </div>
 
   <!-- MODAL DE SELEÇÃO DE GRÁFICOS + DATAS -->
-  <div id="graphsModal" class="hidden">
+  <div id="graphsModal" class="hidden" role="dialog" aria-modal="true">
     <div class="modal-overlay"></div>
-    <div class="fixed inset-0 flex items-center justify-center z-50 p-3 sm:p-6">
+    <div class="modal-shell">
       <div class="modal-card card rounded-xl2 bg-brand-surface p-5 relative overflow-hidden">
         <button id="modalClose" class="absolute right-3 top-3 text-brand-muted hover:text-brand-text text-lg">✕</button>
 
