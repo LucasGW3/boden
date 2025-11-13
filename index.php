@@ -525,11 +525,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       foreach ($romaneio_rows as $r) {
         $var = trim($r['variedade'] ?? '');
         if ($var==='') continue;
-        if (!isset($agg[$var])) $agg[$var] = ['cx1'=>0,'cx2'=>0,'cx3'=>0,'cx4'=>0,'cx5'=>0,'residuo'=>0,'refugo'=>0];
-        foreach (['cx1','cx2','cx3','cx4','cx5','residuo','refugo'] as $k) $agg[$var][$k] += (int)($r[$k] ?? 0);
+        if (!isset($agg[$var])) {
+          $agg[$var] = [
+            'cx1'=>0,'cx2'=>0,'cx3'=>0,'cx3G'=>0,'cx4'=>0,'cx5'=>0,'diversas'=>0,'residuo'=>0,'refugo'=>0
+          ];
+        }
+        foreach (['cx1','cx2','cx3','cx3G','cx4','cx5','diversas','residuo','refugo'] as $k) {
+          $agg[$var][$k] += (int)($r[$k] ?? 0);
+        }
       }
       foreach ($agg as $var=>$v) {
-        $util = (int)$v['cx1'] + (int)$v['cx2'] + (int)$v['cx3'] + (int)$v['cx4'] + (int)$v['cx5'];
+        $util = (int)$v['cx1'] + (int)$v['cx2'] + (int)$v['cx3'] + (int)$v['cx3G'] + (int)$v['cx4'] + (int)$v['cx5'] + (int)$v['diversas'];
         $den  = $util + (int)$v['residuo'] + (int)$v['refugo'];
         $pct  = $den>0 ? ($util/$den*100.0) : null;
         if ($den>0) { $tot_uti += $util; $tot_all += $den; }
@@ -1242,7 +1248,7 @@ foreach ($tabOrder as $t) { if (!empty($can[$t])) { $defaultTab = $t; break; } }
                 </span>
               </label>
             </div>
-            <?php echo render_rows_compact($rowsP14,[ 'variedade'=>'Variedade','cx1'=>'Cx1','cx2'=>'Cx2','cx3'=>'Cx3','cx3G'=>'Cx 3G','cx4'=>'Cx4','cx5'=>'Cx5','residuo'=>'Resíduo','refugo'=>'Refugo' ]); ?>
+             <?php echo render_rows_compact($rowsP14,[ 'variedade'=>'Variedade','cx1'=>'Cx1','cx2'=>'Cx2','cx3'=>'Cx3','cx3G'=>'Cx 3G','cx4'=>'Cx4','cx5'=>'Cx5','diversas'=>'Diversas','residuo'=>'Resíduo','refugo'=>'Refugo' ]); ?>
             <div id="pRomaneio" class="space-y-3 mt-3"></div>
             <input type="hidden" name="p_romaneio" id="p_romaneio_json" />
           </div>
@@ -1503,6 +1509,7 @@ document.addEventListener('DOMContentLoaded', () => {
       { name:'cx3G', label:'Cx 3G', type:'number', attrs:{ step:'1', min:'0' } },
       { name:'cx4', label:'Cx 4', type:'number', attrs:{ step:'1', min:'0' } },
       { name:'cx5', label:'Cx 5', type:'number', attrs:{ step:'1', min:'0' } },
+      { name:'diversas', label:'Diversas', type:'number', attrs:{ step:'1', min:'0' } },
       { name:'residuo', label:'Resíduo', type:'number', attrs:{ step:'1', min:'0' } },
       { name:'refugo',  label:'Refugo',  type:'number', attrs:{ step:'1', min:'0' } },
     ]),
@@ -1562,13 +1569,13 @@ document.addEventListener('DOMContentLoaded', () => {
     for (const r of rows){
       const v = (r.variedade||'').trim();
       if (!v) continue;
-      if (!agg[v]) agg[v] = {cx1:0,cx2:0,cx3:0,cx3G:0,cx4:0,cx5:0,residuo:0,refugo:0};
-      ['cx1','cx2','cx3','cx3G','cx4','cx5','residuo','refugo'].forEach(k=> agg[v][k]+= toNum(r[k]));
+      if (!agg[v]) agg[v] = {cx1:0,cx2:0,cx3:0,cx3G:0,cx4:0,cx5:0,diversas:0,residuo:0,refugo:0};
+      ['cx1','cx2','cx3','cx3G','cx4','cx5','diversas','residuo','refugo'].forEach(k=> agg[v][k]+= toNum(r[k]));
     }
     const aprovRows = [];
     let totUti=0, totAll=0;
     Object.entries(agg).forEach(([variedade,val])=>{
-      const util = val.cx1+val.cx2+val.cx3+val.cx3G+val.cx4+val.cx5;
+      const util = val.cx1+val.cx2+val.cx3+val.cx3G+val.cx4+val.cx5+val.diversas;
       const den  = util + val.residuo + val.refugo;
       const pct  = den>0 ? (util/den*100) : null;
       if (den>0){ totUti+=util; totAll+=den; }
