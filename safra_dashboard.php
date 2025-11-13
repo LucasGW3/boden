@@ -1091,11 +1091,10 @@ $mediaAprov = $avgOf($series['p_aprov_dia']);
 ksort($fazCarrRawSumPerDay);
 ksort($fazCarrRawCntPerDay);
 $labelsISO  = array_keys($byDay);
-$labelsRawF = array_keys($fazCarrRawSumPerDay);
 
 $rawGlobalSum = array_sum($fazCarrRawSumPerDay);
 $rawGlobalCnt = array_sum($fazCarrRawCntPerDay);
-$mediaFazCarrRaw = ($rawGlobalCnt>0) ? round($rawGlobalSum/$rawGlobalCnt, 3) : null;
+$mediaFazCarr_period = ($rawGlobalCnt>0) ? round($rawGlobalSum/$rawGlobalCnt, 3) : null;
 
 /* =============================================================================
  * 10) Séries por tipo (produção, fazenda e logística)
@@ -1120,48 +1119,112 @@ $prodCarrDailyMeanSeries = [];
 $prodDescDailyMeanSeries = [];
 $logDailyMeanSeries      = [];
 
-foreach (array_keys($byDay) as $d) {
-  $carrValsForMean = [];
-  foreach ($typesProd as $t) {
-    $val = (isset($prodCarrByType[$d][$t]) && $prodCarrByType[$d][$t]['cnt']>0)
-      ? round($prodCarrByType[$d][$t]['sum'] / $prodCarrByType[$d][$t]['cnt'], 3)
-      : null;
-    $seriesProdCarrTipos[$t][] = $val;
-    if ($val !== null) $carrValsForMean[] = $val;
-  }
-  $prodCarrDailyMeanSeries[] = count($carrValsForMean) ? round(array_sum($carrValsForMean)/count($carrValsForMean), 3) : null;
+$prodCarrDailySumArr = [];
+$prodCarrDailyCntArr = [];
+$prodDescDailySumArr = [];
+$prodDescDailyCntArr = [];
+$logDailySumArr      = [];
+$logDailyCntArr      = [];
 
-  $descValsForMean = [];
-  foreach ($typesProdDesc as $t) {
-    $val = (isset($prodDescByType[$d][$t]) && $prodDescByType[$d][$t]['cnt']>0)
-      ? round($prodDescByType[$d][$t]['sum'] / $prodDescByType[$d][$t]['cnt'], 3)
-      : null;
-    $seriesProdDescTipos[$t][] = $val;
-    if ($val !== null) $descValsForMean[] = $val;
+$totalCarrSum = 0.0; $totalCarrCnt = 0;
+$totalDescSum = 0.0; $totalDescCnt = 0;
+$totalLogSum  = 0.0; $totalLogCnt  = 0;
+
+foreach (array_keys($byDay) as $d) {
+  $dailyCarrSum = 0.0; $dailyCarrCnt = 0;
+  foreach ($typesProd as $t) {
+    $entry = $prodCarrByType[$d][$t] ?? null;
+    $cnt   = $entry['cnt'] ?? 0;
+    if ($cnt > 0) {
+      $sum = (float)$entry['sum'];
+      $val = round($sum / $cnt, 3);
+      $dailyCarrSum += $sum;
+      $dailyCarrCnt += (int)$cnt;
+    } else {
+      $val = null;
+    }
+    $seriesProdCarrTipos[$t][] = $val;
   }
-  $prodDescDailyMeanSeries[] = count($descValsForMean) ? round(array_sum($descValsForMean)/count($descValsForMean), 3) : null;
+  if ($dailyCarrCnt > 0) {
+    $prodCarrDailyMeanSeries[] = round($dailyCarrSum / $dailyCarrCnt, 3);
+    $prodCarrDailySumArr[] = round($dailyCarrSum, 3);
+    $prodCarrDailyCntArr[] = (int)$dailyCarrCnt;
+    $totalCarrSum += $dailyCarrSum;
+    $totalCarrCnt += $dailyCarrCnt;
+  } else {
+    $prodCarrDailyMeanSeries[] = null;
+    $prodCarrDailySumArr[] = null;
+    $prodCarrDailyCntArr[] = null;
+  }
+
+  $dailyDescSum = 0.0; $dailyDescCnt = 0;
+  foreach ($typesProdDesc as $t) {
+    $entry = $prodDescByType[$d][$t] ?? null;
+    $cnt   = $entry['cnt'] ?? 0;
+    if ($cnt > 0) {
+      $sum = (float)$entry['sum'];
+      $val = round($sum / $cnt, 3);
+      $dailyDescSum += $sum;
+      $dailyDescCnt += (int)$cnt;
+    } else {
+      $val = null;
+    }
+    $seriesProdDescTipos[$t][] = $val;
+  }
+  if ($dailyDescCnt > 0) {
+    $prodDescDailyMeanSeries[] = round($dailyDescSum / $dailyDescCnt, 3);
+    $prodDescDailySumArr[] = round($dailyDescSum, 3);
+    $prodDescDailyCntArr[] = (int)$dailyDescCnt;
+    $totalDescSum += $dailyDescSum;
+    $totalDescCnt += $dailyDescCnt;
+  } else {
+    $prodDescDailyMeanSeries[] = null;
+    $prodDescDailySumArr[] = null;
+    $prodDescDailyCntArr[] = null;
+  }
 
   foreach ($typesFaz as $t) {
-    $seriesFazCarrTipos[$t][] = (isset($fazCarrByType[$d][$t]) && $fazCarrByType[$d][$t]['cnt']>0)
-      ? round($fazCarrByType[$d][$t]['sum'], 3) : null;
+    $entry = $fazCarrByType[$d][$t] ?? null;
+    $cnt   = $entry['cnt'] ?? 0;
+    if ($cnt > 0) {
+      $sum = (float)$entry['sum'];
+      $seriesFazCarrTipos[$t][] = round($sum / $cnt, 3);
+    } else {
+      $seriesFazCarrTipos[$t][] = null;
+    }
   }
 
-  $logValsForMean = [];
+  $dailyLogSum = 0.0; $dailyLogCnt = 0;
   foreach ($typesLog as $t) {
-    $val = (isset($logByType[$d][$t]) && $logByType[$d][$t]['cnt']>0)
-      ? round($logByType[$d][$t]['sum'] / $logByType[$d][$t]['cnt'], 3)
-      : null;
+    $entry = $logByType[$d][$t] ?? null;
+    $cnt   = $entry['cnt'] ?? 0;
+    if ($cnt > 0) {
+      $sum = (float)$entry['sum'];
+      $val = round($sum / $cnt, 3);
+      $dailyLogSum += $sum;
+      $dailyLogCnt += (int)$cnt;
+    } else {
+      $val = null;
+    }
     $seriesLogTipos[$t][] = $val;
-    if ($val !== null) $logValsForMean[] = $val;
   }
-  $logDailyMeanSeries[] = count($logValsForMean) ? round(array_sum($logValsForMean)/count($logValsForMean), 3) : null;
+    if ($dailyLogCnt > 0) {
+    $logDailyMeanSeries[] = round($dailyLogSum / $dailyLogCnt, 3);
+    $logDailySumArr[] = round($dailyLogSum, 3);
+    $logDailyCntArr[] = (int)$dailyLogCnt;
+    $totalLogSum += $dailyLogSum;
+    $totalLogCnt += $dailyLogCnt;
+  } else {
+    $logDailyMeanSeries[] = null;
+    $logDailySumArr[] = null;
+    $logDailyCntArr[] = null;
+  }
 }
 
 /* Médias do período (min) */
-$avgOf = $avgOf;
-$mediaTMC_period = $avgOf($prodCarrDailyMeanSeries);
-$mediaTMD_period = $avgOf($prodDescDailyMeanSeries);
-$mediaLog_all    = $avgOf($logDailyMeanSeries);
+$mediaTMC_period = ($totalCarrCnt>0) ? round($totalCarrSum/$totalCarrCnt, 3) : null;
+$mediaTMD_period = ($totalDescCnt>0) ? round($totalDescSum/$totalDescCnt, 3) : null;
+$mediaLog_all    = ($totalLogCnt >0) ? round($totalLogSum /$totalLogCnt , 3) : null;
 
 /* LOGÍSTICA (2 veículos + média) */
 $desiredLogTypes = ['Carreta LS', 'Truck'];
@@ -1174,22 +1237,50 @@ $seriesLogTiposSel = [];
 foreach ($typesLogSel as $t) { $seriesLogTiposSel[$t] = $seriesLogTipos[$t] ?? []; }
 
 $logDailyMeanSel = [];
+$logDailySumSel  = [];
+$logDailyCntSel  = [];
 $lenLabels = count($labels);
+$logSelTotalSum = 0.0; $logSelTotalCnt = 0;
 for ($i=0; $i<$lenLabels; $i++) {
-  $vals = [];
+  $dayIso = $labelsISO[$i] ?? null;
+  $sum = 0.0; $cnt = 0;
   foreach ($typesLogSel as $t) {
-    $v = $seriesLogTiposSel[$t][$i] ?? null;
-    if ($v !== null) $vals[] = (float)$v;
+$entry = ($dayIso !== null) ? ($logByType[$dayIso][$t] ?? null) : null;
+    $c = $entry['cnt'] ?? 0;
+    if ($c > 0) {
+      $sum += (float)$entry['sum'];
+      $cnt += (int)$c;
+    }
   }
-  $logDailyMeanSel[] = (count($vals) === 2) ? round(($vals[0]+$vals[1])/2, 3) : (count($vals) ? round(array_sum($vals)/count($vals), 3) : null);
+  if ($cnt > 0) {
+    $logDailySumSel[] = round($sum, 3);
+    $logDailyCntSel[] = $cnt;
+    $logDailyMeanSel[] = round($sum / $cnt, 3);
+    $logSelTotalSum += $sum;
+    $logSelTotalCnt += $cnt;
+  } else {
+    $logDailySumSel[] = null;
+    $logDailyCntSel[] = null;
+    $logDailyMeanSel[] = null;
+  }
 }
-$mediaLogSel = $avgOf($logDailyMeanSel);
+$mediaLogSel = ($logSelTotalCnt>0) ? round($logSelTotalSum/$logSelTotalCnt, 3) : null;
 
 $fazCarrRawSumArr = [];
 $fazCarrRawCntArr = [];
+$fazCarrDailyMeanSeries = [];
 foreach ($labelsISO as $d) {
-  $fazCarrRawSumArr[] = isset($fazCarrRawSumPerDay[$d]) ? round((float)$fazCarrRawSumPerDay[$d], 3) : null;
-  $fazCarrRawCntArr[] = isset($fazCarrRawCntPerDay[$d]) ? (int)$fazCarrRawCntPerDay[$d] : null;
+  $sum = isset($fazCarrRawSumPerDay[$d]) ? (float)$fazCarrRawSumPerDay[$d] : null;
+  $cnt = isset($fazCarrRawCntPerDay[$d]) ? (int)$fazCarrRawCntPerDay[$d] : 0;
+  if ($cnt > 0 && $sum !== null) {
+    $fazCarrRawSumArr[] = round($sum, 3);
+    $fazCarrRawCntArr[] = $cnt;
+    $fazCarrDailyMeanSeries[] = round($sum / $cnt, 3);
+  } else {
+    $fazCarrRawSumArr[] = null;
+    $fazCarrRawCntArr[] = null;
+    $fazCarrDailyMeanSeries[] = null;
+  }
 }
 
 $labelsCISO = array_keys($comHojeByDate);
@@ -1640,8 +1731,10 @@ $mediaF19 = $avgOf($series['f19_dia']);
 
   // ===== LOGÍSTICA (2 veículos + média) — minutos
   const typesLogSel   = <?php echo json_encode(array_values($typesLogSel), JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const logTiposSel   = <?php echo json_encode($seriesLogTiposSel, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const logTiposSel     = <?php echo json_encode($seriesLogTiposSel, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const logDailyMeanSel = <?php echo json_encode($logDailyMeanSel, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const logDailySumSel  = <?php echo json_encode($logDailySumSel, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const logDailyCntSel  = <?php echo json_encode($logDailyCntSel, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const mediaLogSel     = <?php echo json_encode($mediaLogSel, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>; // min
 
   // Produção / Fazenda — minutos
@@ -1651,8 +1744,13 @@ $mediaF19 = $avgOf($series['f19_dia']);
 
   // NOVO: médias diárias (entre tipos) — minutos
   const prodCarrDailyMean = <?php echo json_encode($prodCarrDailyMeanSeries, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const prodCarrDailySum  = <?php echo json_encode($prodCarrDailySumArr, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const prodCarrDailyCnt  = <?php echo json_encode($prodCarrDailyCntArr, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const prodDescDailyMean = <?php echo json_encode($prodDescDailyMeanSeries, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-
+  const prodDescDailySum  = <?php echo json_encode($prodDescDailySumArr, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const prodDescDailyCnt  = <?php echo json_encode($prodDescDailyCntArr, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const fazCarrDailyMean  = <?php echo json_encode($fazCarrDailyMeanSeries, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  
   const mediaTMC_period   = <?php echo json_encode($mediaTMC_period, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>; // min
   const mediaTMD_period   = <?php echo json_encode($mediaTMD_period, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>; // min
 
@@ -1662,7 +1760,7 @@ $mediaF19 = $avgOf($series['f19_dia']);
   // ===== BRUTOS da Fazenda Carregamento — minutos
   const fazCarrRawSum = <?php echo json_encode($fazCarrRawSumArr, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const fazCarrRawCnt = <?php echo json_encode($fazCarrRawCntArr, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
-  const mediaFazCarrRaw = <?php echo json_encode($mediaFazCarrRaw, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>; // min
+  const mediaFazCarr_period = <?php echo json_encode($mediaFazCarr_period, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>; // min
 
   // NOVO: médias separadas Pessoas/Colhedora
   const mediaF17 = <?php echo json_encode($mediaF17, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
@@ -1724,17 +1822,25 @@ $mediaF19 = $avgOf($series['f19_dia']);
     typesLogSel: [...typesLogSel],
     logTiposSel: JSON.parse(JSON.stringify(logTiposSel)),
     logDailyMeanSel: [...logDailyMeanSel],
+    logDailySumSel: [...logDailySumSel],
+    logDailyCntSel: [...logDailyCntSel],
     mediaLogSel: mediaLogSel,
 
     mediaParada: mediaParada,
 
     // médias diárias (entre tipos) em minutos
     prodCarrDailyMean: [...prodCarrDailyMean],
+    prodCarrDailySum: [...prodCarrDailySum],
+    prodCarrDailyCnt: [...prodCarrDailyCnt],
     prodDescDailyMean: [...prodDescDailyMean],
+    prodDescDailySum: [...prodDescDailySum],
+    prodDescDailyCnt: [...prodDescDailyCnt],
+    fazCarrDailyMean: [...fazCarrDailyMean],
 
     // BRUTOS FAZENDA
     fazCarrRawSum: [...fazCarrRawSum],
     fazCarrRawCnt: [...fazCarrRawCnt],
+    mediaFazCarr_period: mediaFazCarr_period,
 
     // META (% diário)
     atingPct: [...atingPct],
@@ -2035,6 +2141,22 @@ function avgNonNull(arr){
   return c ? (s / c) : null;
 }
 
+function avgFromSumCnt(sumArr, cntArr){
+  let totalSum = 0, totalCnt = 0;
+  const len = Math.min(sumArr ? sumArr.length : 0, cntArr ? cntArr.length : 0);
+  for (let i=0; i<len; i++) {
+    const sumVal = sumArr[i];
+    const cntVal = cntArr[i];
+    if (sumVal == null || cntVal == null) continue;
+    const s = Number(sumVal);
+    const c = Number(cntVal);
+    if (Number.isNaN(s) || Number.isNaN(c) || c <= 0) continue;
+    totalSum += s;
+    totalCnt += c;
+  }
+  return totalCnt ? (totalSum / totalCnt) : null;
+}
+
 // ======== Helpers Comercial por caixa =========
 function combineBoxSeries(seriesMap, countMap, selectedBoxes, len){
   const boxes = (selectedBoxes && selectedBoxes.length)
@@ -2185,12 +2307,18 @@ function sumNumbers(arr){
     // PRODUÇÃO: médias diárias (entre tipos) re-filtradas — MINUTOS
     const prodCarrMeanF_min = sliceByIdx(BASE.prodCarrDailyMean, keep);
     const prodDescMeanF_min = sliceByIdx(BASE.prodDescDailyMean, keep);
-    const mediaTMCF_min     = avgNonNull(prodCarrMeanF_min);
-    const mediaTMDF_min     = avgNonNull(prodDescMeanF_min);
+    const prodCarrSumF_min  = sliceByIdx(BASE.prodCarrDailySum, keep);
+    const prodCarrCntF_min  = sliceByIdx(BASE.prodCarrDailyCnt, keep);
+    const prodDescSumF_min  = sliceByIdx(BASE.prodDescDailySum, keep);
+    const prodDescCntF_min  = sliceByIdx(BASE.prodDescDailyCnt, keep);
+    const mediaTMCF_min     = avgFromSumCnt(prodCarrSumF_min, prodCarrCntF_min);
+    const mediaTMDF_min     = avgFromSumCnt(prodDescSumF_min, prodDescCntF_min);
 
     // LOGÍSTICA (2 veículos): média diária — MINUTOS
     const logMeanTwo_min = sliceByIdx(BASE.logDailyMeanSel, keep);
-    const mediaLogF      = avgNonNull(logMeanTwo_min);
+    const logSumSel_min  = sliceByIdx(BASE.logDailySumSel, keep);
+    const logCntSel_min  = sliceByIdx(BASE.logDailyCntSel, keep);
+    const mediaLogF      = avgFromSumCnt(logSumSel_min, logCntSel_min);
 
     // ===== SAFRA KPI (recalcula no recorte) =====
     (function(){
@@ -2435,30 +2563,20 @@ if (can) {
       CH.fazCarr.data.labels = L;
 
       const ds = [];
-      const perTypeSeriesH = [];
       for (const typeName of BASE.typesFaz){
         const serieH = seriesMinToHours(sliceByIdx(BASE.fazCarrTipos[typeName] || [], keep));
-        perTypeSeriesH.push(serieH);
         ds.push(mkLine(`${typeName} (total/dia)`, serieH, colorForType(typeName, true), 'y', { borderWidth:3 }));
       }
 
-      const dailyMeanH = L.map((_, i) => {
-        const vals = perTypeSeriesH
-        .map(s => s[i])
-        .filter(v => v != null && !Number.isNaN(v) && Number(v) > 0);
-        return vals.length ? (vals.reduce((a,b)=>a+Number(b),0) / vals.length) : null;
-      });
-
+      const dailyMeanH = seriesMinToHours(sliceByIdx(BASE.fazCarrDailyMean, keep));
       ds.push(mkLine('Média diária (Fazenda • Carregamento)', dailyMeanH, THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }));
 
       CH.fazCarr.data.datasets = ds;
       CH.fazCarr.update();
 
-      const mediaPeriodoMin = (function(arrH){
-        let s=0,c=0; for(const v of arrH){ if(v!=null && !Number.isNaN(v)){ s+=Number(v); c++; } }
-        const mediaH = c? (s/c) : null;
-        return mediaH==null? null : mediaH*60;
-      })(dailyMeanH);
+      const rawSumSel = sliceByIdx(BASE.fazCarrRawSum, keep);
+      const rawCntSel = sliceByIdx(BASE.fazCarrRawCnt, keep);
+      const mediaPeriodoMin = avgFromSumCnt(rawSumSel, rawCntSel);
 
       setMetaHours('faz-carreg-meta', mediaPeriodoMin);
     }
