@@ -868,48 +868,38 @@ $comBoxNames = array_values($comBoxNames);
 $comHojeBoxSeries = [];
 $comHojeBoxCount  = [];
 foreach ($comBoxNames as $boxName) {
-  $series = [];
+  $boxSeries = [];
   $counts = [];
   foreach ($labelsCISO_H as $dateYmd) {
     $vals = $comHojeByBox[$boxName][$dateYmd] ?? null;
     if ($vals && $vals['cnt'] > 0) {
-      $series[] = round($vals['sum'] / $vals['cnt'], 3);
+      $boxSeries[] = round($vals['sum'] / $vals['cnt'], 3);
       $counts[] = (int)$vals['cnt'];
     } else {
-      $series[] = null;
+      $boxSeries[] = null;
       $counts[] = 0;
     }
   }
-  $comHojeBoxSeries[$boxName] = $series;
+  $comHojeBoxSeries[$boxName] = $boxSeries;
   $comHojeBoxCount[$boxName]  = $counts;
-}
-
-/* 8) Preenche preços ONTEM */
-while ($r = $stPO->fetch(PDO::FETCH_ASSOC)) {
-  $d  = $r['ref_date'];
-  $vn = (string)$r['variedade'];
-  $pr = is_numeric($r['preco']) ? (float)$r['preco'] : null;
-  if ($pr === null || !isset($idxByDateO[$d]) || !isset($comOntemVarPrice[$vn])) continue;
-  $i = $idxByDateO[$d];
-  $comOntemVarPrice[$vn][$i] = $pr;
 }
 
 $comOntemBoxSeries = [];
 $comOntemBoxCount  = [];
 foreach ($comBoxNames as $boxName) {
-  $series = [];
+  $boxSeries = [];
   $counts = [];
   foreach ($labelsCISO_O as $dateYmd) {
     $vals = $comOntemByBox[$boxName][$dateYmd] ?? null;
     if ($vals && $vals['cnt'] > 0) {
-      $series[] = round($vals['sum'] / $vals['cnt'], 3);
+      $boxSeries[] = round($vals['sum'] / $vals['cnt'], 3);
       $counts[] = (int)$vals['cnt'];
     } else {
-      $series[] = null;
+      $boxSeries[] = null;
       $counts[] = 0;
     }
   }
-  $comOntemBoxSeries[$boxName] = $series;
+  $comOntemBoxSeries[$boxName] = $boxSeries;
   $comOntemBoxCount[$boxName]  = $counts;
 }
 
