@@ -753,6 +753,9 @@ $comOntemByDate = [];
 $comHojeByBox   = []; // [Caixa][Y-m-d] => ['sum'=>..., 'cnt'=>...]
 $comOntemByBox  = [];
 $comBoxSet      = [];
+$comVarietySet  = [];
+$comHojeByVarBox = []; // [Variedade][Caixa][Y-m-d]
+$comOntemByVarBox = [];
 
 while ($row = $cStmt->fetch(PDO::FETCH_ASSOC)) {
   $d = $row['ref_date'];
@@ -786,6 +789,18 @@ while ($row = $cStmt->fetch(PDO::FETCH_ASSOC)) {
     if ($caixa === '') $caixa = 'Caixa';
     $comBoxSet[$caixa] = true;
 
+    $varRaw = $v['variedade']
+      ?? $v['variedade_nome']
+      ?? $v['var']
+      ?? $v['variety']
+      ?? null;
+    if (is_array($varRaw)) {
+      $varRaw = $varRaw['nome'] ?? $varRaw['label'] ?? reset($varRaw);
+    }
+    $variedade = trim((string)$varRaw);
+    if ($variedade === '') $variedade = 'Sem variedade';
+    $comVarietySet[$variedade] = true;
+
     // ----- valores de HOJE (qualquer uma das chaves abaixo)
     $candidatosHoje = [
       $v['preco']        ?? null,
@@ -802,6 +817,12 @@ while ($row = $cStmt->fetch(PDO::FETCH_ASSOC)) {
         if (!isset($comHojeByBox[$caixa][$d])) $comHojeByBox[$caixa][$d] = ['sum' => 0.0, 'cnt' => 0];
         $comHojeByBox[$caixa][$d]['sum'] += $num;
         $comHojeByBox[$caixa][$d]['cnt'] += 1;
+
+        if (!isset($comHojeByVarBox[$variedade])) $comHojeByVarBox[$variedade] = [];
+        if (!isset($comHojeByVarBox[$variedade][$caixa])) $comHojeByVarBox[$variedade][$caixa] = [];
+        if (!isset($comHojeByVarBox[$variedade][$caixa][$d])) $comHojeByVarBox[$variedade][$caixa][$d] = ['sum' => 0.0, 'cnt' => 0];
+        $comHojeByVarBox[$variedade][$caixa][$d]['sum'] += $num;
+        $comHojeByVarBox[$variedade][$caixa][$d]['cnt'] += 1;
 
         break; // considera uma por item
       }
@@ -823,6 +844,12 @@ while ($row = $cStmt->fetch(PDO::FETCH_ASSOC)) {
         if (!isset($comOntemByBox[$caixa][$d])) $comOntemByBox[$caixa][$d] = ['sum' => 0.0, 'cnt' => 0];
         $comOntemByBox[$caixa][$d]['sum'] += $num;
         $comOntemByBox[$caixa][$d]['cnt'] += 1;
+
+        if (!isset($comOntemByVarBox[$variedade])) $comOntemByVarBox[$variedade] = [];
+        if (!isset($comOntemByVarBox[$variedade][$caixa])) $comOntemByVarBox[$variedade][$caixa] = [];
+        if (!isset($comOntemByVarBox[$variedade][$caixa][$d])) $comOntemByVarBox[$variedade][$caixa][$d] = ['sum' => 0.0, 'cnt' => 0];
+        $comOntemByVarBox[$variedade][$caixa][$d]['sum'] += $num;
+        $comOntemByVarBox[$variedade][$caixa][$d]['cnt'] += 1;
 
         break;
       }
@@ -865,6 +892,10 @@ $comBoxNames = array_keys($comBoxSet);
 natcasesort($comBoxNames);
 $comBoxNames = array_values($comBoxNames);
 
+$comVarietyNames = array_keys($comVarietySet);
+natcasesort($comVarietyNames);
+$comVarietyNames = array_values($comVarietyNames);
+
 $comHojeBoxSeries = [];
 $comHojeBoxCount  = [];
 foreach ($comBoxNames as $boxName) {
@@ -901,6 +932,52 @@ foreach ($comBoxNames as $boxName) {
   }
   $comOntemBoxSeries[$boxName] = $boxSeries;
   $comOntemBoxCount[$boxName]  = $counts;
+}
+
+$comHojeVarBoxSeries = [];
+$comHojeVarBoxCount  = [];
+foreach ($comVarietyNames as $varName) {
+  $comHojeVarBoxSeries[$varName] = [];
+  $comHojeVarBoxCount[$varName]  = [];
+  foreach ($comBoxNames as $boxName) {
+    $boxSeries = [];
+    $counts = [];
+    foreach ($labelsCISO_H as $dateYmd) {
+      $vals = $comHojeByVarBox[$varName][$boxName][$dateYmd] ?? null;
+      if ($vals && $vals['cnt'] > 0) {
+        $boxSeries[] = round($vals['sum'] / $vals['cnt'], 3);
+        $counts[] = (int)$vals['cnt'];
+      } else {
+        $boxSeries[] = null;
+        $counts[] = 0;
+      }
+    }
+    $comHojeVarBoxSeries[$varName][$boxName] = $boxSeries;
+    $comHojeVarBoxCount[$varName][$boxName]  = $counts;
+  }
+}
+
+$comOntemVarBoxSeries = [];
+$comOntemVarBoxCount  = [];
+foreach ($comVarietyNames as $varName) {
+  $comOntemVarBoxSeries[$varName] = [];
+  $comOntemVarBoxCount[$varName]  = [];
+  foreach ($comBoxNames as $boxName) {
+    $boxSeries = [];
+    $counts = [];
+    foreach ($labelsCISO_O as $dateYmd) {
+      $vals = $comOntemByVarBox[$varName][$boxName][$dateYmd] ?? null;
+      if ($vals && $vals['cnt'] > 0) {
+        $boxSeries[] = round($vals['sum'] / $vals['cnt'], 3);
+        $counts[] = (int)$vals['cnt'];
+      } else {
+        $boxSeries[] = null;
+        $counts[] = 0;
+      }
+    }
+    $comOntemVarBoxSeries[$varName][$boxName] = $boxSeries;
+    $comOntemVarBoxCount[$varName][$boxName]  = $counts;
+  }
 }
 
 /* =============================================================================
@@ -1303,8 +1380,16 @@ $mediaF19 = $avgOf($series['f19_dia']);
       <section id="secComercial" class="card rounded-xl2 bg-brand-surface p-5">
         <h2 class="font-semibold mb-1">Comercial • Preço por SC • Hoje (R$)</h2>
         <p id="com-meta" class="text-xs text-brand-muted mb-2">—</p>
-        <!-- (NOVO) Filtro dentro do card -->
-        <div id="comercialVarPicker" class="mb-3 flex flex-wrap gap-2 text-xs"></div>
+        <?php if (!empty($comVarietyNames)): ?>
+        <div class="mb-2">
+          <p class="text-[11px] uppercase tracking-wide text-brand-muted">Variedades</p>
+          <div id="comercialVarietyPicker" class="mt-1 flex flex-wrap gap-2 text-xs"></div>
+        </div>
+        <?php endif; ?>
+        <div class="mb-3">
+          <p class="text-[11px] uppercase tracking-wide text-brand-muted">Caixas</p>
+          <div id="comercialVarPicker" class="mt-1 flex flex-wrap gap-2 text-xs"></div>
+        </div>
         <canvas id="chartComercialMedia"></canvas>
       </section>
       <?php endif; ?>
@@ -1313,8 +1398,16 @@ $mediaF19 = $avgOf($series['f19_dia']);
       <section id="secComercialOntem" class="card rounded-xl2 bg-brand-surface p-5">
         <h2 class="font-semibold mb-1">Comercial • Preço por SC • Realizado (R$)</h2>
         <p id="com-ontem-meta" class="text-xs text-brand-muted mb-2">—</p>
-        <!-- (NOVO) Filtro dentro do card -->
-        <div id="comercialOntemVarPicker" class="mb-3 flex flex-wrap gap-2 text-xs"></div>
+        <?php if (!empty($comVarietyNames)): ?>
+        <div class="mb-2">
+          <p class="text-[11px] uppercase tracking-wide text-brand-muted">Variedades</p>
+          <div id="comercialOntemVarietyPicker" class="mt-1 flex flex-wrap gap-2 text-xs"></div>
+        </div>
+        <?php endif; ?>
+        <div class="mb-3">
+          <p class="text-[11px] uppercase tracking-wide text-brand-muted">Caixas</p>
+          <div id="comercialOntemVarPicker" class="mt-1 flex flex-wrap gap-2 text-xs"></div>
+        </div>
         <canvas id="chartComercialOntem"></canvas>
       </section>
       <?php endif; ?>
@@ -1515,10 +1608,15 @@ $mediaF19 = $avgOf($series['f19_dia']);
 
   // Comercial por caixa (series e contagens)
   const comBoxNames       = <?php echo json_encode($comBoxNames, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const comVarietyNames   = <?php echo json_encode($comVarietyNames, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const comHojeBoxSeries  = <?php echo json_encode($comHojeBoxSeries, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const comHojeBoxCount   = <?php echo json_encode($comHojeBoxCount, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const comOntemBoxSeries = <?php echo json_encode($comOntemBoxSeries, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const comOntemBoxCount  = <?php echo json_encode($comOntemBoxCount, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const comHojeVarBoxSeries = <?php echo json_encode($comHojeVarBoxSeries, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const comHojeVarBoxCount  = <?php echo json_encode($comHojeVarBoxCount, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const comOntemVarBoxSeries = <?php echo json_encode($comOntemVarBoxSeries, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const comOntemVarBoxCount  = <?php echo json_encode($comOntemVarBoxCount, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
 
   // ===== NOVO F18 (linhas)
   const f18VarNames     = <?php echo json_encode($f18VarNames, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
@@ -1608,6 +1706,11 @@ $mediaF19 = $avgOf($series['f19_dia']);
     comHojeBoxCount:  JSON.parse(JSON.stringify(comHojeBoxCount  || {})),
     comOntemBoxSeries: JSON.parse(JSON.stringify(comOntemBoxSeries || {})),
     comOntemBoxCount:  JSON.parse(JSON.stringify(comOntemBoxCount  || {})),
+    comVarietyNames: [...(comVarietyNames || [])],
+    comHojeVarBoxSeries: JSON.parse(JSON.stringify(comHojeVarBoxSeries || {})),
+    comHojeVarBoxCount:  JSON.parse(JSON.stringify(comHojeVarBoxCount  || {})),
+    comOntemVarBoxSeries: JSON.parse(JSON.stringify(comOntemVarBoxSeries || {})),
+    comOntemVarBoxCount:  JSON.parse(JSON.stringify(comOntemVarBoxCount  || {})),
 
     typesProd: [...typesProd],
     typesProdDesc: [...typesProdDesc],
@@ -1967,6 +2070,48 @@ function weightedMean(series, weights){
     }
   }
   return (wq>0) ? (ws / wq) : null;
+}
+function aggregateVarietySeries(periodKey, selectedVarieties){
+  const allVarieties = BASE.comVarietyNames || [];
+  const baseSeries = (periodKey === 'H') ? BASE.comHojeBoxSeries : BASE.comOntemBoxSeries;
+  const baseCount  = (periodKey === 'H') ? BASE.comHojeBoxCount  : BASE.comOntemBoxCount;
+  const varSeries  = (periodKey === 'H') ? BASE.comHojeVarBoxSeries : BASE.comOntemVarBoxSeries;
+  const varCounts  = (periodKey === 'H') ? BASE.comHojeVarBoxCount  : BASE.comOntemVarBoxCount;
+  const hasVarData = allVarieties.length && varSeries && Object.keys(varSeries).length;
+  if (!hasVarData) {
+    return { seriesMap: baseSeries, countMap: baseCount };
+  }
+  const normSel = (selectedVarieties && selectedVarieties.length)
+    ? Array.from(new Set(selectedVarieties))
+    : [...allVarieties];
+  if (normSel.length === allVarieties.length) {
+    return { seriesMap: baseSeries, countMap: baseCount };
+  }
+  const len = (periodKey === 'H') ? BASE.labelsC_H.length : BASE.labelsC_O.length;
+  const boxes = BASE.comBoxNames || [];
+  const outSeries = {};
+  const outCounts = {};
+  boxes.forEach(box => {
+    const sums = new Array(len).fill(0);
+    const weights = new Array(len).fill(0);
+    normSel.forEach(varName => {
+      const serie = varSeries?.[varName]?.[box] || [];
+      const counts = varCounts?.[varName]?.[box] || [];
+      for (let i=0;i<len;i++){
+        const val = serie[i];
+        const weight = counts[i];
+        if (val == null) continue;
+        const numVal = Number(val);
+        const numWeight = Number(weight);
+        if (Number.isNaN(numVal) || Number.isNaN(numWeight) || numWeight <= 0) continue;
+        sums[i] += numVal * numWeight;
+        weights[i] += numWeight;
+      }
+    });
+    outSeries[box] = sums.map((s,i)=> weights[i] > 0 ? Number((s / weights[i]).toFixed(3)) : null);
+    outCounts[box] = weights.map(w => Number(w));
+  });
+  return { seriesMap: outSeries, countMap: outCounts };
 }
 function buildVarPicker(containerId, varNames, initialSel, onChange){
   const el = document.getElementById(containerId);
@@ -2579,10 +2724,10 @@ Chart.register(noDataPlugin);
     }
   });
 
-  // Seletor e cálculo inicial por caixa
-  buildVarPicker('comercialVarPicker', boxNames, boxNames, (sel) => {
-    const selected = (sel && sel.length) ? sel : boxNames;
-    window._comercialSelH = selected;
+    const updateHoje = () => {
+    const selected = (window._comercialSelH && window._comercialSelH.length) ? window._comercialSelH : boxNames;
+    const varSel = (window._comercialVarSelH && window._comercialVarSelH.length) ? window._comercialVarSelH : null;
+    const { seriesMap, countMap } = aggregateVarietySeries('H', varSel);
 
     const idx = (window._keepIdxH && window._keepIdxH.length)
       ? window._keepIdxH
@@ -2594,7 +2739,7 @@ Chart.register(noDataPlugin);
     const selSet = new Set(selected);
     for (let i=0;i<boxNames.length;i++){
       const box = boxNames[i];
-      const serieFull = BASE.comHojeBoxSeries?.[box] || [];
+      const serieFull = seriesMap?.[box] || [];
       const data = sliceByIdx(serieFull, idx);
       const dataset = CH.comercial.data.datasets[i];
       dataset.data = data;
@@ -2603,7 +2748,7 @@ Chart.register(noDataPlugin);
       dataset.borderColor = colorForCaixa(box);
     }
 
-    const { series: combinedFull, weights: weightsFull } = combineBoxSeries(BASE.comHojeBoxSeries, BASE.comHojeBoxCount, selected, BASE.labelsC_H.length);
+    const { series: combinedFull, weights: weightsFull } = combineBoxSeries(seriesMap, countMap, selected, BASE.labelsC_H.length);
     const combined = sliceByIdx(combinedFull, idx);
     const weights  = sliceByIdx(weightsFull,  idx);
 
@@ -2618,6 +2763,20 @@ Chart.register(noDataPlugin);
 
     CH.comercial.update();
     setMetaMoney(document.getElementById('com-meta'), medW);
+    };
+
+  const allVariedadesH = BASE.comVarietyNames || [];
+  window._comercialVarSelH = [...allVariedadesH];
+  if (document.getElementById('comercialVarietyPicker') && allVariedadesH.length) {
+    buildVarPicker('comercialVarietyPicker', allVariedadesH, allVariedadesH, (sel) => {
+      window._comercialVarSelH = (sel && sel.length) ? sel : [...allVariedadesH];
+      updateHoje();
+    });
+  }
+
+  buildVarPicker('comercialVarPicker', boxNames, boxNames, (sel) => {
+    window._comercialSelH = (sel && sel.length) ? sel : boxNames;
+    updateHoje();
   });
 })();
 
@@ -2651,10 +2810,10 @@ Chart.register(noDataPlugin);
     }
   });
 
-  // Seletor e cálculo inicial por caixa (Ontem)
-  buildVarPicker('comercialOntemVarPicker', boxNames, boxNames, (sel) => {
-    const selected = (sel && sel.length) ? sel : boxNames;
-    window._comercialSelO = selected;
+    const updateOntem = () => {
+    const selected = (window._comercialSelO && window._comercialSelO.length) ? window._comercialSelO : boxNames;
+    const varSel = (window._comercialVarSelO && window._comercialVarSelO.length) ? window._comercialVarSelO : null;
+    const { seriesMap, countMap } = aggregateVarietySeries('O', varSel);
 
     const idx = (window._keepIdxO && window._keepIdxO.length)
       ? window._keepIdxO
@@ -2666,7 +2825,7 @@ Chart.register(noDataPlugin);
     const selSet = new Set(selected);
     for (let i=0;i<boxNames.length;i++){
       const box = boxNames[i];
-      const serieFull = BASE.comOntemBoxSeries?.[box] || [];
+      const serieFull = seriesMap?.[box] || [];
       const data = sliceByIdx(serieFull, idx);
       const dataset = CH.comercialOntem.data.datasets[i];
       dataset.data = data;
@@ -2675,7 +2834,7 @@ Chart.register(noDataPlugin);
       dataset.borderColor = colorForCaixa(box);
     }
 
-    const { series: combinedFull, weights: weightsFull } = combineBoxSeries(BASE.comOntemBoxSeries, BASE.comOntemBoxCount, selected, BASE.labelsC_O.length);
+    const { series: combinedFull, weights: weightsFull } = combineBoxSeries(seriesMap, countMap, selected, BASE.labelsC_O.length);
     const combined = sliceByIdx(combinedFull, idx);
     const weights  = sliceByIdx(weightsFull,  idx);
 
@@ -2690,6 +2849,20 @@ Chart.register(noDataPlugin);
 
     CH.comercialOntem.update();
     setMetaMoney(document.getElementById('com-ontem-meta'), medW);
+      };
+
+  const allVariedadesO = BASE.comVarietyNames || [];
+  window._comercialVarSelO = [...allVariedadesO];
+  if (document.getElementById('comercialOntemVarietyPicker') && allVariedadesO.length) {
+    buildVarPicker('comercialOntemVarietyPicker', allVariedadesO, allVariedadesO, (sel) => {
+      window._comercialVarSelO = (sel && sel.length) ? sel : [...allVariedadesO];
+      updateOntem();
+    });
+  }
+
+  buildVarPicker('comercialOntemVarPicker', boxNames, boxNames, (sel) => {
+    window._comercialSelO = (sel && sel.length) ? sel : boxNames;
+    updateOntem();
   });
 })();
 
