@@ -432,7 +432,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($can['producao']) {
       $allowed_desc = ['carreta_ls','truck'];
-      $allowed_carg = ['carreta_ls','truck','bitruck','sider'];
+      $allowed_carg = ['carreta_ls','truck','bitruck','sider','outros'];
 
       $descargas = json_decode($_POST['p_descargas'] ?? '[]', true) ?: [];
       $cargas    = json_decode($_POST['p_cargas']    ?? '[]', true) ?: [];
@@ -1124,6 +1124,7 @@ foreach ($tabOrder as $t) { if (!empty($can[$t])) { $defaultTab = $t; break; } }
                 <button type="button" class="btn-add-carg px-3 py-1.5 text-xs rounded-full border border-brand-line bg-white hover:bg-brand-bg" data-tipo="truck">Truck</button>
                 <button type="button" class="btn-add-carg px-3 py-1.5 text-xs rounded-full border border-brand-line bg-white hover:bg-brand-bg" data-tipo="bitruck">Bitruck</button>
                 <button type="button" class="btn-add-carg px-3 py-1.5 text-xs rounded-full border border-brand-line bg-white hover:bg-brand-bg" data-tipo="sider">Sider</button>
+                <button type="button" class="btn-add-carg px-3 py-1.5 text-xs rounded-full border border-brand-line bg-white hover:bg-brand-bg" data-tipo="outros">Outros</button>
               </div>
             </div>
             <div id="pCargas" class="space-y-3"></div>
@@ -1454,7 +1455,13 @@ document.addEventListener('DOMContentLoaded', () => {
   const CAIXAS     = ['Caixa 1','Caixa 2','Caixa 3','Caixa 3G','Caixa 4','Caixa 5'];
   const VARIEDADES = ['Mirela','Madalin','Topazio','Robusta','Karaja','Vale Sul','Lucinda','Irati','Salto Grande'];
   const TIPOS_DESC = [{value:'carreta_ls',label:'Carreta LS'},{value:'truck',label:'Truck'}];
-  const TIPOS_CARG = [{value:'carreta_ls',label:'Carreta LS'},{value:'truck',label:'Truck'},{value:'bitruck',label:'Bitruck'},{value:'sider',label:'Sider'}];
+    const TIPOS_CARG = [
+    {value:'carreta_ls',label:'Carreta LS'},
+    {value:'truck',label:'Truck'},
+    {value:'bitruck',label:'Bitruck'},
+    {value:'sider',label:'Sider'},
+    {value:'outros',label:'Outros'}
+  ];
   const TIPOS_FAZ_CARG = [{value:'carreta_ls',label:'Carreta LS'},{value:'truck',label:'Truck'}];
   const TIPOS_LOG = TIPOS_DESC;
 
