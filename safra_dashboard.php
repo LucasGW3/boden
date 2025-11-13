@@ -1581,7 +1581,7 @@ $mediaF19 = $avgOf($series['f19_dia']);
 
       <?php if (in_array('secProdAting', $allowedSections, true)): ?>
       <section id="secProdAting" class="card rounded-xl2 bg-brand-surface p-5">
-        <h2 class="font-semibold mb-1">Produção • Atingimento da Meta (%) × Sacos/Dia</h2>
+        <h2 class="font-semibold mb-1">Produção • Meta × Sacos Beneficiados/Dia</h2>
         <p id="prod-ating-meta" class="text-xs text-brand-muted mb-3">—</p>
         <canvas id="chartProdAting"></canvas>
       </section>
@@ -1924,7 +1924,7 @@ $mediaF19 = $avgOf($series['f19_dia']);
     {id:'secQDefeitos',      label:'Defeitos (%)',                   icon:ico.qualidade, role:'qualidade'},
     {id:'secQUniform',       label:'Uniformidade (%)',               icon:ico.qualidade, role:'qualidade'},
     {id:'secProdSacos',      label:'Sacos & por colaborador',        icon:ico.producao,  role:'producao'},
-    {id:'secProdAting',      label:'Atingimento da meta x Sacos/Dia',icon:ico.producao,  role:'producao' },
+    {id:'secProdAting',      label:'Meta × Sacos Beneficiados/Dia', icon:ico.producao,  role:'producao' },
     {id:'secProdCarreg',     label:'Carregamento por tipo',          icon:ico.producao,  role:'producao'},
     {id:'secProdDesc',       label:'Descarregamento por tipo',       icon:ico.producao,  role:'producao'},
     {id:'secProdParada',     label:'Máquina parada (h)',             icon:ico.producao,  role:'producao'},
@@ -2313,6 +2313,30 @@ function sumNumbers(arr){
   return (arr || []).reduce((s, v) => s + ((v != null && !Number.isNaN(Number(v))) ? Number(v) : 0), 0);
 }
 
+function setProdMetaSummary(realSeries, metaSeries){
+  const el = document.getElementById('prod-ating-meta');
+  if (!el) return;
+
+  const totalReal = sumNumbers(realSeries);
+  const totalMeta = sumNumbers(metaSeries);
+
+  if ((totalReal == null || totalReal <= 0) && (totalMeta == null || totalMeta <= 0)) {
+    el.textContent = '—';
+    return;
+  }
+
+  const fmtNum = (n) => Number(n).toLocaleString('pt-BR', { maximumFractionDigits: 0 });
+  const parts = [];
+  if (totalReal > 0) parts.push(`Realizado: ${fmtNum(totalReal)} sacos`);
+  if (totalMeta > 0) parts.push(`Meta: ${fmtNum(totalMeta)} sacos`);
+  if (totalReal > 0 && totalMeta > 0) {
+    const pct = (totalReal / totalMeta) * 100;
+    parts.push(`Atingimento: ${pct.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}%`);
+  }
+
+  el.textContent = '• ' + parts.join(' • ');
+}
+
   function applyDateFilterClient(dFrom, dTo){
     const url = new URL(location.href);
     dFrom ? url.searchParams.set('from', dFrom) : url.searchParams.delete('from');
@@ -2432,6 +2456,19 @@ if (can) {
   });
   can._chartInstance = g;
 }
+
+    if (CH.prodAting){
+        const labelsF = sliceByIdx(BASE.labels, keep);
+        const pctF    = sliceByIdx(BASE.atingPct, keep);
+
+        CH.prodAting.data.labels = labelsF;
+        if (CH.prodAting.data.datasets?.[0]) CH.prodAting.data.datasets[0].data = realF;
+        if (CH.prodAting.data.datasets?.[1]) CH.prodAting.data.datasets[1].data = metaF;
+        if (CH.prodAting.data.datasets?.[2]) CH.prodAting.data.datasets[2].data = pctF;
+        CH.prodAting.update();
+
+        setProdMetaSummary(realF, metaF);
+      }
 
     // === Comercial HOJE (linhas por caixa) ===
     if (CH.comercial){
@@ -3114,24 +3151,27 @@ Chart.register(noDataPlugin);
     });
   })();
 
-  // ===== Produção: Atingimento da Meta (%) — versão simples (só 1 linha)
+  // ===== Produção: Meta × Sacos beneficiados/dia + percentual
   (function(){
     const el = document.getElementById('chartProdAting');
     if (!el) return;
 
-    const hasAting = (BASE.atingPct || []).some(v => v != null && !Number.isNaN(v));
+    const metaSeries = BASE.metaSeriesByDay || [];
+    const realSeries = BASE.realSeriesByDay || [];
+    const pctSeries  = BASE.atingPct || [];
 
-    if (!hasAting) {
+    const hasSeries = [metaSeries, realSeries].some(arr => (arr || []).some(v => v != null && !Number.isNaN(Number(v))));
+
+    if (!hasSeries) {
       CH.prodAting = new Chart(el, {
         data: { labels, datasets: [] },
         options: {
           responsive: true,
           plugins: { legend: { display:false }, noData: { text:'Sem dados no período' } },
-          scales: { y:{ beginAtZero:true, suggestedMax:120, title:{ display:true, text:'Atingimento (%)' } } }
+          scales: { y:{ beginAtZero:true, title:{ display:true, text:'Sacos beneficiados/dia' } } }
         }
       });
-      const elMeta = document.getElementById('prod-ating-meta');
-      if (elMeta) elMeta.textContent = '—';
+      setProdMetaSummary([], []);
       return;
     }
 
@@ -3139,32 +3179,48 @@ Chart.register(noDataPlugin);
       data: {
         labels,
         datasets: [
-          mkLine('Meta', BASE.atingPct, THEME.g2, 'y', { borderWidth:3 })
+          mkBar('Sacos beneficiados/dia', realSeries, THEME.g2, 'y'),
+          mkLine('Meta do dia (sacos)', metaSeries, THEME.g1, 'y', { borderWidth:3 }),
+          mkLine('Atingimento (%)', pctSeries, THEME.yellow, 'y1', {
+            borderDash:[6,4],
+            borderWidth:2,
+            pointRadius:0,
+            pointHoverRadius:0,
+            pointRadiusLast:3,
+            pointHoverRadiusLast:4
+          })
         ]
       },
       options: {
         responsive: true,
+        interaction:{ mode:'index', intersect:false },
         plugins: {
           legend: { position:'bottom' },
           tooltip: {
             callbacks: {
               label: (ctx) => {
                 const v = ctx.parsed.y;
-                const txt = (v==null?'-':Number(v).toLocaleString('pt-BR',{ minimumFractionDigits:0, maximumFractionDigits:2 }));
-                return `${ctx.dataset.label}: ${txt} %`;
+                if (v == null || Number.isNaN(Number(v))) return `${ctx.dataset.label}: -`;
+                const axis = ctx.dataset.yAxisID;
+                const suffix = axis === 'y1' ? ' %' : ' sacos';
+                const digits = axis === 'y1'
+                  ? { minimumFractionDigits:0, maximumFractionDigits:2 }
+                  : { maximumFractionDigits:0 };
+                const txt = Number(v).toLocaleString('pt-BR', digits);
+                return `${ctx.dataset.label}: ${txt}${suffix}`;
               }
             }
           },
           noData:{ text:'Sem dados no período' }
         },
         scales: {
-          y: { beginAtZero:true, suggestedMax:120, title:{ display:true, text:'Atingimento (%)' } }
+          y:  { beginAtZero:true, title:{ display:true, text:'Sacos beneficiados/dia' } },
+          y1: { beginAtZero:true, suggestedMax:120, position:'right', grid:{ drawOnChartArea:false }, title:{ display:true, text:'Atingimento (%)' } }
         }
       }
     });
 
-    const elMeta = document.getElementById('prod-ating-meta');
-    if (elMeta) elMeta.textContent = '—';
+    setProdMetaSummary(realSeries, metaSeries);
   })();
 
   // ===== Produção: Carregamento — HORAS
