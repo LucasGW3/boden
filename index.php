@@ -449,7 +449,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!in_array($tipo, $allowed_carg, true)) continue;
         $hhmm = preg_replace('/[^0-9:]/','', $r['hhmm'] ?? '');
         $min  = hhmm_to_minutes($hhmm) ?? null;
-        $carg_norm[] = ['tipo'=>$tipo, 'hhmm'=>$hhmm, 'min'=>$min];
+        $pessoas = isset($r['pessoas']) && $r['pessoas'] !== '' ? max(0, (int)$r['pessoas']) : null;
+        $row = ['tipo'=>$tipo, 'hhmm'=>$hhmm, 'min'=>$min];
+        if ($pessoas !== null) {
+          $row['pessoas'] = $pessoas;
+        }
+        $carg_norm[] = $row;
       }
       $prefDesc   = first_by_tipo($desc_norm, ['carreta_ls']);
       $prefCarg   = first_by_tipo($carg_norm, ['carreta_ls']);
@@ -1508,6 +1513,7 @@ document.addEventListener('DOMContentLoaded', () => {
     pCargas: bindRepeater('pCargas','p_cargas_json',[
       { name:'tipo', label:'Tipo', type:'select', options: TIPOS_CARG },
       { name:'hhmm', label:'Tempo (HH:MM)', type:'time', attrs:{ step:'60' } },
+      { name:'pessoas', label:'Pessoas Carregamento', type:'number', attrs:{ step:'1', min:'0' } },
     ]),
     fCarregamentos: bindRepeater('fCarregamentos','f_carregamentos_json',[
       { name:'tipo', label:'Tipo', type:'select', options: TIPOS_FAZ_CARG },
@@ -1531,7 +1537,7 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', ()=>{ repeaters.pDescargas.add({ tipo: btn.dataset.tipo, hhmm:'' }); });
   });
   document.querySelectorAll('.btn-add-carg').forEach(btn=>{
-    btn.addEventListener('click', ()=>{ repeaters.pCargas.add({ tipo: btn.dataset.tipo, hhmm:'' }); });
+    btn.addEventListener('click', ()=>{ repeaters.pCargas.add({ tipo: btn.dataset.tipo, hhmm:'', pessoas:'' }); });
   });
   document.querySelectorAll('.btn-add-fcarg').forEach(btn=>{
     btn.addEventListener('click', ()=>{ repeaters.fCarregamentos.add({ tipo: btn.dataset.tipo, hhmm:'' }); });
