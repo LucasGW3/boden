@@ -928,7 +928,7 @@ sort($allVarList, SORT_NATURAL | SORT_FLAG_CASE);
     const pe = peForVar(varName);
 
     return [
-      mkLine('Preço atual do dia', atualArr, '#0072B2', { endLabel:true, endLabelText:'AT', borderWidth:3 }),
+      mkLine('Preço Projetado', atualArr, '#0072B2', { endLabel:true, endLabelText:'AT', borderWidth:3 }),
       mkLine('Preço médio acumulado (geral)', acumArr, '#63AA35', { endLabel:true, endLabelText:'AC', borderWidth:3 }),
       mkLine('Preço médio realizado – dia anterior', antArr, '#E69F00', { endLabel:true, endLabelText:'AN', borderDash:[6,4] }),
       mkLine(`PE/Colheita (${pe.colheita.toFixed(2)})`, new Array(atualArr.length).fill(pe.colheita), '#F0E442', {
@@ -972,7 +972,7 @@ sort($allVarList, SORT_NATURAL | SORT_FLAG_CASE);
     const colAtual = document.createElement('div');
     const titleAtual=document.createElement('div');
     titleAtual.className='text-xs font-semibold text-brand-muted mb-1';
-    titleAtual.textContent='Preço Atual';
+    titleAtual.textContent='Preço Projetado';
     const canvasAtual=document.createElement('canvas');
     canvasAtual.height=480;
     colAtual.appendChild(titleAtual);
@@ -981,7 +981,7 @@ sort($allVarList, SORT_NATURAL | SORT_FLAG_CASE);
     const colAnt = document.createElement('div');
     const titleAnt=document.createElement('div');
     titleAnt.className='text-xs font-semibold text-brand-muted mb-1';
-    titleAnt.textContent='Preço Anterior';
+    titleAnt.textContent='Preço Realizado';
     const canvasAnt=document.createElement('canvas');
     canvasAnt.height=480;
     colAnt.appendChild(titleAnt);
@@ -995,7 +995,7 @@ sort($allVarList, SORT_NATURAL | SORT_FLAG_CASE);
     wrapResumo.className='mt-4';
     const titleResumo=document.createElement('div');
     titleResumo.className='text-xs font-semibold text-brand-muted mb-1';
-    titleResumo.textContent='Resumo: PM dia anterior × PM acumulado × Preço atual';
+    titleResumo.textContent='Resumo: PM dia anterior × PM acumulado × Preço projetado';
     const canvasResumo=document.createElement('canvas');
     canvasResumo.height=420;
     wrapResumo.appendChild(titleResumo);
