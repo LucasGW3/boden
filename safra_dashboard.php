@@ -137,7 +137,7 @@ $SECTIONS_BY_ROLE = [
   'comercial' => ['secComercial','secComercialOntem'],
   'logistica' => ['secLogistica'],
   'qualidade' => ['secQPelada','secQDefeitos','secQUniform'],
-  'producao'  => ['secProdSacos','secProdCarreg','secProdDesc','secProdParada','secProdAprov','secProdAting','secProdAtingSafra'],
+  'producao'  => ['secProdSacos','secProdCarreg','secProdDesc','secProdParada','secProdAprov','secProdAting','secProdAtingSafra','secProdRomaneio'],
   'fazenda'   => ['secFazCarreg','secFazDesc','secFazPessoas','secFazColhedora','secPie'],
 ];
 $ALL_SECTIONS = array_values(array_unique(array_merge(...array_values($SECTIONS_BY_ROLE))));
@@ -157,6 +157,7 @@ $CAP_BY_SECTION = [
   'secProdAting'        => ['view',  'dashboard_producao'],
   /* +++ NOVO +++ */
   'secProdAtingSafra'   => ['view',  'dashboard_producao'],
+  'secProdRomaneio'     => ['view',  'dashboard_producao'],
   'secFazCarreg'        => ['view',  'dashboard_fazenda'],
   'secFazDesc'          => ['view',  'dashboard_fazenda'],
   'secFazPessoas'       => ['view',  'dashboard_fazenda'],
@@ -629,6 +630,7 @@ foreach ($rows as $r) {
 }
 
 ksort($byDay);
+$labelsISO  = array_keys($byDay);
 $labels     = [];
 $allMetrics = array_merge($metricsAvg, $metricsSum, $metricsOverride);
 $series     = array_fill_keys($allMetrics, []);
@@ -981,7 +983,97 @@ foreach ($comVarietyNames as $varName) {
 }
 
 /* =============================================================================
- * 8) F18 — Big bag por Variedade (LINHAS por dia)
+  * 8) Produção — Romaneio por Variedade e Caixa
+ * ========================================================================== */
+$romBoxKeys = ['cx1','cx2','cx3','cx3G','cx4','cx5','diversas','residuo','refugo'];
+$romBoxLabels = [
+  'cx1'      => 'Cx 1',
+  'cx2'      => 'Cx 2',
+  'cx3'      => 'Cx 3',
+  'cx3G'     => 'Cx 3G',
+  'cx4'      => 'Cx 4',
+  'cx5'      => 'Cx 5',
+  'diversas' => 'Diversas',
+  'residuo'  => 'Resíduo',
+  'refugo'   => 'Refugo',
+];
+
+$sqlRom = "
+  SELECT ref_date, payload_json
+  FROM safra_entries
+  WHERE ref_date >= :from AND ref_date < DATE_ADD(:to, INTERVAL 1 DAY)
+    AND (:u1 = '' OR unidade = :u2)
+  {$restrictUnitsSQL}
+  ORDER BY ref_date ASC, id ASC
+";
+$stRom = pdo()->prepare($sqlRom);
+$stRom->execute($params ?: []);
+
+$romByDateBox = [];
+$romByVarBox  = [];
+$romVarietySet = [];
+
+while ($row = $stRom->fetch(PDO::FETCH_ASSOC)) {
+  $d = $row['ref_date'];
+  $payload = json_decode($row['payload_json'] ?? 'null', true) ?: [];
+  $romaneio = $payload['producao']['romaneio'] ?? [];
+  if (!is_array($romaneio)) continue;
+  if (array_keys($romaneio) !== range(0, count($romaneio) - 1)) {
+    $romaneio = array_values($romaneio);
+  }
+
+  foreach ($romaneio as $item) {
+    if (!is_array($item)) continue;
+    $varRaw = $item['variedade'] ?? $item['var'] ?? $item['nome'] ?? null;
+    $variedade = trim((string)$varRaw);
+    if ($variedade === '') $variedade = 'Sem variedade';
+    $romVarietySet[$variedade] = true;
+
+    foreach ($romBoxKeys as $boxKey) {
+      if (!array_key_exists($boxKey, $item)) continue;
+      $rawVal = $item[$boxKey];
+      if ($rawVal === null || $rawVal === '') continue;
+      if (is_array($rawVal)) {
+        $rawVal = $rawVal['valor'] ?? reset($rawVal);
+      }
+      if (is_string($rawVal)) {
+        $norm = str_replace(',', '.', preg_replace('/[^0-9,.-]/', '', $rawVal));
+        $rawVal = ($norm === '' || !is_numeric($norm)) ? null : (float)$norm;
+      }
+      if (!is_numeric($rawVal)) continue;
+      $val = (float)$rawVal;
+
+      if (!isset($romByDateBox[$d])) $romByDateBox[$d] = [];
+      if (!array_key_exists($boxKey, $romByDateBox[$d])) $romByDateBox[$d][$boxKey] = 0.0;
+      $romByDateBox[$d][$boxKey] += $val;
+
+      if (!isset($romByVarBox[$variedade])) $romByVarBox[$variedade] = [];
+      if (!isset($romByVarBox[$variedade][$boxKey])) $romByVarBox[$variedade][$boxKey] = [];
+      if (!array_key_exists($d, $romByVarBox[$variedade][$boxKey])) $romByVarBox[$variedade][$boxKey][$d] = 0.0;
+      $romByVarBox[$variedade][$boxKey][$d] += $val;
+    }
+  }
+}
+
+$prodRomVarietyNames = array_keys($romVarietySet);
+natcasesort($prodRomVarietyNames);
+$prodRomVarietyNames = array_values($prodRomVarietyNames);
+
+$prodRomVarBoxSeries = [];
+foreach ($prodRomVarietyNames as $variedade) {
+  $prodRomVarBoxSeries[$variedade] = [];
+  foreach ($romBoxKeys as $boxKey) {
+    $serie = [];
+    foreach ($labelsISO as $d) {
+      $val = $romByVarBox[$variedade][$boxKey][$d] ?? null;
+      $serie[] = ($val !== null) ? round((float)$val, 3) : null;
+    }
+    $prodRomVarBoxSeries[$variedade][$boxKey] = $serie;
+  }
+}
+
+/* =============================================================================
+ * 9) F18 — Big bag por Variedade (LINHAS por dia)
  * ========================================================================== */
 function payload_bigbag_var($payload) {
   return $payload['fazenda']['bigbag_por_variedade']
@@ -1077,7 +1169,7 @@ $avgOf = function($arr){
 $f18TotalMean = $avgOf($f18TotalSeries);
 
 /* =============================================================================
- * 9) Métricas resumo (gerais)
+ * 10) Métricas resumo (gerais)
  * ========================================================================== */
 $mediaLogLegacy   = $avgOf($series['l5']);
 $mediaPelada= $avgOf($series['q6_dia']);
@@ -1097,7 +1189,7 @@ $rawGlobalCnt = array_sum($fazCarrRawCntPerDay);
 $mediaFazCarr_period = ($rawGlobalCnt>0) ? round($rawGlobalSum/$rawGlobalCnt, 3) : null;
 
 /* =============================================================================
- * 10) Séries por tipo (produção, fazenda e logística)
+ * 11) Séries por tipo (produção, fazenda e logística)
  * ========================================================================== */
 $typesProd = array_keys($allTypesProd); sort($typesProd, SORT_NATURAL|SORT_FLAG_CASE);
 $typesProdDesc = array_keys($allTypesProdDesc); sort($typesProdDesc, SORT_NATURAL|SORT_FLAG_CASE);
@@ -1579,6 +1671,19 @@ $mediaF19 = $avgOf($series['f19_dia']);
       </section>
       <?php endif; ?>
 
+      <?php if (in_array('secProdRomaneio', $allowedSections, true)): ?>
+      <section id="secProdRomaneio" class="card rounded-xl2 bg-brand-surface p-5">
+        <h2 class="font-semibold mb-1">Produção • Romaneio por Caixa</h2>
+        <?php if (!empty($prodRomVarietyNames)): ?>
+        <div class="mb-3">
+          <p class="text-[11px] uppercase tracking-wide text-brand-muted">Variedades</p>
+          <div id="prodRomaneioVarietyPicker" class="mt-1 flex flex-wrap gap-2 text-xs"></div>
+        </div>
+        <?php endif; ?>
+        <canvas id="chartProdRomaneio"></canvas>
+      </section>
+      <?php endif; ?>
+
       <?php if (in_array('secProdAting', $allowedSections, true)): ?>
       <section id="secProdAting" class="card rounded-xl2 bg-brand-surface p-5">
         <h2 class="font-semibold mb-1">Produção • Meta × Sacos Beneficiados/Dia</h2>
@@ -1746,6 +1851,12 @@ $mediaF19 = $avgOf($series['f19_dia']);
   const comOntemVarBoxSeries = <?php echo json_encode($comOntemVarBoxSeries, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const comOntemVarBoxCount  = <?php echo json_encode($comOntemVarBoxCount, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
 
+  // Produção — Romaneio por caixa
+  const prodRomVarietyNames = <?php echo json_encode($prodRomVarietyNames, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const prodRomBoxKeys      = <?php echo json_encode($romBoxKeys, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const prodRomBoxLabels    = <?php echo json_encode($romBoxLabels, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const prodRomVarBoxSeries = <?php echo json_encode($prodRomVarBoxSeries, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+
   // ===== NOVO F18 (linhas)
   const f18VarNames     = <?php echo json_encode($f18VarNames, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const f18SeriesByVar  = <?php echo json_encode($f18SeriesByVar, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
@@ -1847,6 +1958,11 @@ $mediaF19 = $avgOf($series['f19_dia']);
     comOntemVarBoxSeries: JSON.parse(JSON.stringify(comOntemVarBoxSeries || {})),
     comOntemVarBoxCount:  JSON.parse(JSON.stringify(comOntemVarBoxCount  || {})),
 
+    prodRomVarietyNames: [...(prodRomVarietyNames || [])],
+    prodRomBoxKeys:      [...(prodRomBoxKeys || [])],
+    prodRomBoxLabels:    JSON.parse(JSON.stringify(prodRomBoxLabels || {})),
+    prodRomVarBoxSeries: JSON.parse(JSON.stringify(prodRomVarBoxSeries || {})),
+
     typesProd: [...typesProd],
     typesProdDesc: [...typesProdDesc],
     typesFaz:  [...typesFaz],
@@ -1924,6 +2040,7 @@ $mediaF19 = $avgOf($series['f19_dia']);
     {id:'secQDefeitos',      label:'Defeitos (%)',                   icon:ico.qualidade, role:'qualidade'},
     {id:'secQUniform',       label:'Uniformidade (%)',               icon:ico.qualidade, role:'qualidade'},
     {id:'secProdSacos',      label:'Sacos & por colaborador',        icon:ico.producao,  role:'producao'},
+    {id:'secProdRomaneio',   label:'Romaneio por caixa',              icon:ico.producao,  role:'producao'},
     {id:'secProdAting',      label:'Meta × Sacos Beneficiados/Dia', icon:ico.producao,  role:'producao' },
     {id:'secProdCarreg',     label:'Carregamento por tipo',          icon:ico.producao,  role:'producao'},
     {id:'secProdDesc',       label:'Descarregamento por tipo',       icon:ico.producao,  role:'producao'},
@@ -2305,6 +2422,34 @@ function buildVarPicker(containerId, varNames, initialSel, onChange){
   render();
 }
 
+function aggregateRomaneioSeries(selectedVarieties){
+  const allVar = BASE.prodRomVarietyNames || [];
+  const active = (selectedVarieties && selectedVarieties.length) ? selectedVarieties : allVar;
+  const boxKeys = BASE.prodRomBoxKeys || [];
+  const len = BASE.labels.length;
+  const varSeries = BASE.prodRomVarBoxSeries || {};
+  const out = {};
+  boxKeys.forEach(boxKey => {
+    const sums = new Array(len).fill(0);
+    const has = new Array(len).fill(false);
+    if (active && active.length) {
+      active.forEach(varName => {
+        const serie = varSeries?.[varName]?.[boxKey] || [];
+        for (let i=0;i<len;i++){
+          const val = serie[i];
+          if (val == null) continue;
+          const num = Number(val);
+          if (Number.isNaN(num)) continue;
+          sums[i] += num;
+          has[i] = true;
+        }
+      });
+    }
+    out[boxKey] = sums.map((sum, idx) => has[idx] ? Number(sum.toFixed(3)) : null);
+  });
+  return out;
+}
+
 // === Helpers globais usados em vários blocos ===
 function isAllNull(arr){
   return !arr || arr.every(v => v == null);
@@ -2335,6 +2480,24 @@ function setProdMetaSummary(realSeries, metaSeries){
   }
 
   el.textContent = '• ' + parts.join(' • ');
+}
+
+function updateProdRomaneioChart(){
+  if (!CH.prodRomaneio) return;
+  const keep = (window._keepIdx && window._keepIdx.length) ? window._keepIdx : BASE.labels.map((_,i)=>i);
+  const labelsF = sliceByIdx(BASE.labels, keep);
+  const agg = aggregateRomaneioSeries(window._prodRomVarSel);
+  CH.prodRomaneio.data.labels = labelsF;
+  const boxKeys = BASE.prodRomBoxKeys || [];
+  boxKeys.forEach((boxKey, idx) => {
+    const dataset = CH.prodRomaneio.data.datasets?.[idx];
+    if (!dataset) return;
+    const fullData = agg[boxKey] || [];
+    dataset.data = sliceByIdx(fullData, keep);
+    dataset.label = BASE.prodRomBoxLabels?.[boxKey] || boxKey;
+    dataset.borderColor = colorForRomaneioBox(boxKey);
+  });
+  CH.prodRomaneio.update();
 }
 
   function applyDateFilterClient(dFrom, dTo){
@@ -2468,6 +2631,10 @@ if (can) {
         CH.prodAting.update();
 
         setProdMetaSummary(realF, metaF);
+      }
+
+      if (CH.prodRomaneio){
+        updateProdRomaneioChart();
       }
 
     // === Comercial HOJE (linhas por caixa) ===
@@ -2886,6 +3053,11 @@ Chart.register(noDataPlugin);
     const idx = (comBoxNames || []).indexOf(name);
     return typePalette[Math.max(0, idx) % typePalette.length];
   };
+  const colorForRomaneioBox = (name) => {
+    const keys = BASE.prodRomBoxKeys || [];
+    const idx = keys.indexOf(name);
+    return typePalette[Math.max(0, idx) % typePalette.length];
+  };
 
 // ===== Comercial HOJE (linha diária por caixa + média do recorte) =====
 (function(){
@@ -3051,6 +3223,39 @@ Chart.register(noDataPlugin);
       updateOntem();
     });
   }
+  // ===== Produção: Romaneio por caixa
+  (function(){
+    const el = document.getElementById('chartProdRomaneio');
+    if (!el) return;
+
+    const boxKeys = BASE.prodRomBoxKeys || [];
+    const datasets = boxKeys.map(boxKey => mkLine(
+      BASE.prodRomBoxLabels?.[boxKey] || boxKey,
+      new Array(labels.length).fill(null),
+      colorForRomaneioBox(boxKey),
+      'y',
+      { borderWidth:3 }
+    ));
+
+    CH.prodRomaneio = new Chart(el, {
+      data:{ labels, datasets },
+      options:{
+        ...baseOpts(true),
+        plugins:{ ...baseOpts(true).plugins, legend:{ position:'bottom', labels:{ boxWidth:12 } } },
+        scales:{ y:{ beginAtZero:true, title:{ display:true, text:'Caixas' } } }
+      }
+    });
+
+    window._prodRomVarSel = [...(BASE.prodRomVarietyNames || [])];
+    if (document.getElementById('prodRomaneioVarietyPicker') && (BASE.prodRomVarietyNames || []).length){
+      buildVarPicker('prodRomaneioVarietyPicker', BASE.prodRomVarietyNames, BASE.prodRomVarietyNames, (sel)=>{
+        window._prodRomVarSel = (sel && sel.length) ? sel : [...(BASE.prodRomVarietyNames || [])];
+        updateProdRomaneioChart();
+      });
+    }
+
+    updateProdRomaneioChart();
+  })();
 
   buildVarPicker('comercialOntemVarPicker', boxNames, boxNames, (sel) => {
     window._comercialSelO = (sel && sel.length) ? sel : boxNames;
