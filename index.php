@@ -868,17 +868,7 @@ foreach ($tabOrder as $t) { if (!empty($can[$t])) { $defaultTab = $t; break; } }
   <title>Boden - Safra Cebola 25/26</title>
   <link href="https://fonts.googleapis.com/css2?family=Cabin:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/png" sizes="96x96" href="./favicon-96x96.png">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: { extend: {
-        fontFamily: { sans: ['Nunito','ui-sans-serif','system-ui'] },
-        colors: { brand: { bg:'#F9FAFB', surface:'#FFFFFF', line:'#E0E7E0', primary:'#5FB141', primaryDark:'#3C8F28', text:'#273418', muted:'#6B7280' } },
-        borderRadius: { lg:'0.75rem', xl:'1rem', '2xl':'1.5rem' },
-        boxShadow: { 'soft-green':'0 10px 25px -5px rgba(95,177,65,.08), 0 4px 8px -1 rgba(95,177,65,.1)' }
-      } }
-    }
-  </script>
+  <link rel="stylesheet" href="./dist/styles.css">
   <style>
     body { background-color:#F9FAFB; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
     input[type="number"]{ text-align:right; }
@@ -889,7 +879,7 @@ foreach ($tabOrder as $t) { if (!empty($can[$t])) { $defaultTab = $t; break; } }
   </style>
   <?php render_datepicker_assets(); ?>
 </head>
-<body class="text-brand-text bg-brand-bg">
+<body class="text-brand-text">
   <!-- Nav -->
  <?php render_boden_navbar('form'); ?>
   <div class="max-w-7xl mx-auto p-6 lg:p-10">

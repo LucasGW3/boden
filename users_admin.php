@@ -168,7 +168,7 @@ $flash = flash();
   <title>Boden - Safra Cebola 25/26</title>
   <link href="https://fonts.googleapis.com/css2?family=Cabin:ital,wght@0,400..700;1,400..700&family=Josefin+Sans:ital,wght@0,100..700;1,100..700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/png" sizes="96x96" href="./favicon-96x96.png">
-  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="./dist/styles.css">
   <style>
     body { background:#F9FAFB; }
     .card { border:1px solid #E5E7EB; box-shadow:0 6px 18px rgba(0,0,0,.05); }

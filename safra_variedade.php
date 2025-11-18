@@ -495,19 +495,7 @@ sort($allVarList, SORT_NATURAL | SORT_FLAG_CASE);
   <title>Boden - Dashboard Variedade</title>
   <link href="https://fonts.googleapis.com/css2?family=Cabin:ital,wght@0,400..700;1,400..700&family=Josefin+Sans:ital,wght@0,100..700;1,100..700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/png" sizes="96x96" href="./favicon-96x96.png">
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      theme: {
-        extend: {
-          fontFamily: { sans: ['Nunito','ui-sans-serif','system-ui'] },
-          colors: { brand: { bg:'#F4F9F2', surface:'#FFFFFF', line:'#E5F2DE', primary:'#5FB141', primaryDark:'#3C8F28', text:'#273418', muted:'#7A8F6B' } },
-          borderRadius: { pill:'9999px', xl2:'1rem' },
-          boxShadow: { soft:'0 6px 18px rgba(60,143,40,0.08)' }
-        }
-      }
-    }
-  </script>
+  <link rel="stylesheet" href="./dist/styles.css">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     body { background-color:#F9FAFB; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
