@@ -1454,6 +1454,59 @@ $mediaF19 = $avgOf($series['f19_dia']);
       padding:1.5rem 1rem;
       overflow:auto;
     }
+
+    /* Modais compactos (comercial) */
+    .modal-backdrop{
+      position:fixed;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:12px;
+      background:rgba(17,24,39,0.35);
+      -webkit-backdrop-filter:blur(6px);
+      backdrop-filter:blur(6px);
+      z-index:1800;
+    }
+    .modal-backdrop.hidden{ display:none; }
+    .modal-compact{
+      width:100%;
+      max-width:460px;
+      background:#fff;
+      border-radius:18px;
+      border:1px solid rgba(0,0,0,0.05);
+      box-shadow:0 12px 40px rgba(0,0,0,0.12);
+      padding:18px 18px 14px;
+      position:relative;
+    }
+    .modal-compact h3{
+      margin:0;
+      font-size:16px;
+      font-weight:700;
+      color:#1f2933;
+    }
+    .modal-compact .modal-head{
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+      margin-bottom:12px;
+    }
+    .modal-compact .close-btn{
+      border:none;
+      background:transparent;
+      color:#6b7280;
+      font-size:20px;
+      line-height:1;
+      cursor:pointer;
+    }
+    .modal-compact .close-btn:hover{ color:#111827; }
+    .modal-compact .footer{
+      margin-top:16px;
+      display:flex;
+      justify-content:flex-end;
+      gap:8px;
+    }
     .modal-card{
       width:min(1500px, calc(100vw - 2rem));
       max-width:1680px;
@@ -1601,40 +1654,77 @@ $mediaF19 = $avgOf($series['f19_dia']);
 
       <?php if (in_array('secComercial', $allowedSections, true)): ?>
       <section id="secComercial" class="card rounded-xl2 bg-brand-surface p-5">
-        <h2 class="font-semibold mb-1">Comercial • Preço por SC • Hoje (R$)</h2>
-        <p id="com-meta" class="text-xs text-brand-muted mb-2">—</p>
-        <?php if (!empty($comVarietyNames)): ?>
-        <div class="mb-2">
-          <p class="text-[11px] uppercase tracking-wide text-brand-muted">Variedades</p>
-          <div id="comercialVarietyPicker" class="mt-1 flex flex-wrap gap-2 text-xs"></div>
+        <div class="flex items-start justify-between gap-2 mb-1">
+          <h2 class="font-semibold">Comercial - Preco por SC - Hoje (R$)</h2>
+          <button id="btnComercialHojeFilters" type="button" class="inline-flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border border-brand-line bg-white text-brand-text hover:bg-brand-surface-strong shadow-sm transition">
+            <span aria-hidden="true" class="text-sm leading-none">&equiv;</span>
+            <span class="font-semibold">Filtros</span>
+          </button>
         </div>
-        <?php endif; ?>
-        <div class="mb-3">
-          <p class="text-[11px] uppercase tracking-wide text-brand-muted">Caixas</p>
-          <div id="comercialVarPicker" class="mt-1 flex flex-wrap gap-2 text-xs"></div>
-        </div>
+        <p id="com-meta" class="text-xs text-brand-muted mb-3">-</p>
         <canvas id="chartComercialMedia"></canvas>
       </section>
       <?php endif; ?>
 
       <?php if (in_array('secComercialOntem', $allowedSections, true)): ?>
       <section id="secComercialOntem" class="card rounded-xl2 bg-brand-surface p-5">
-        <h2 class="font-semibold mb-1">Comercial • Preço por SC • Realizado (R$)</h2>
-        <p id="com-ontem-meta" class="text-xs text-brand-muted mb-2">—</p>
-        <?php if (!empty($comVarietyNames)): ?>
-        <div class="mb-2">
-          <p class="text-[11px] uppercase tracking-wide text-brand-muted">Variedades</p>
-          <div id="comercialOntemVarietyPicker" class="mt-1 flex flex-wrap gap-2 text-xs"></div>
+        <div class="flex items-start justify-between gap-2 mb-1">
+          <h2 class="font-semibold">Comercial - Preco por SC - Realizado (R$)</h2>
+          <button id="btnComercialOntemFilters" type="button" class="inline-flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border border-brand-line bg-white text-brand-text hover:bg-brand-surface-strong shadow-sm transition">
+            <span aria-hidden="true" class="text-sm leading-none">&equiv;</span>
+            <span class="font-semibold">Filtros</span>
+          </button>
         </div>
-        <?php endif; ?>
-        <div class="mb-3">
-          <p class="text-[11px] uppercase tracking-wide text-brand-muted">Caixas</p>
-          <div id="comercialOntemVarPicker" class="mt-1 flex flex-wrap gap-2 text-xs"></div>
-        </div>
+        <p id="com-ontem-meta" class="text-xs text-brand-muted mb-3">-</p>
         <canvas id="chartComercialOntem"></canvas>
       </section>
       <?php endif; ?>
 
+
+      <!-- Modais de filtro do Comercial -->
+      <div id="modalComercialHoje" class="modal-backdrop hidden">
+        <div class="modal-compact">
+          <div class="modal-head">
+            <h3>Filtros - Comercial Hoje</h3>
+            <button type="button" class="close-btn" data-close-modal="1" aria-label="Fechar">&times;</button>
+          </div>
+          <?php if (!empty($comVarietyNames)): ?>
+          <div class="mb-3">
+            <p class="text-[11px] uppercase tracking-wide text-brand-muted">Variedades</p>
+            <div id="comercialVarietyPicker" class="mt-2 flex flex-wrap gap-2 text-xs"></div>
+          </div>
+          <?php endif; ?>
+          <div class="mb-2">
+            <p class="text-[11px] uppercase tracking-wide text-brand-muted">Caixas</p>
+            <div id="comercialVarPicker" class="mt-2 flex flex-wrap gap-2 text-xs"></div>
+          </div>
+          <div class="footer">
+            <button type="button" class="px-3 py-1.5 text-sm rounded-lg border border-brand-line text-brand-text hover:bg-brand-surface-strong" data-close-modal="1">Fechar</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="modalComercialOntem" class="modal-backdrop hidden">
+        <div class="modal-compact">
+          <div class="modal-head">
+            <h3>Filtros - Comercial Realizado</h3>
+            <button type="button" class="close-btn" data-close-modal="1" aria-label="Fechar">&times;</button>
+          </div>
+          <?php if (!empty($comVarietyNames)): ?>
+          <div class="mb-3">
+            <p class="text-[11px] uppercase tracking-wide text-brand-muted">Variedades</p>
+            <div id="comercialOntemVarietyPicker" class="mt-2 flex flex-wrap gap-2 text-xs"></div>
+          </div>
+          <?php endif; ?>
+          <div class="mb-2">
+            <p class="text-[11px] uppercase tracking-wide text-brand-muted">Caixas</p>
+            <div id="comercialOntemVarPicker" class="mt-2 flex flex-wrap gap-2 text-xs"></div>
+          </div>
+          <div class="footer">
+            <button type="button" class="px-3 py-1.5 text-sm rounded-lg border border-brand-line text-brand-text hover:bg-brand-surface-strong" data-close-modal="1">Fechar</button>
+          </div>
+        </div>
+      </div>
       <?php if (in_array('secLogistica', $allowedSections, true)): ?>
       <section id="secLogistica" class="card rounded-xl2 bg-brand-surface p-5">
         <h2 class="font-semibold mb-1">Logística • Tempo de transporte (h)</h2>
@@ -1676,17 +1766,35 @@ $mediaF19 = $avgOf($series['f19_dia']);
 
       <?php if (in_array('secProdRomaneio', $allowedSections, true)): ?>
       <section id="secProdRomaneio" class="card rounded-xl2 bg-brand-surface p-5">
-        <h2 class="font-semibold mb-1">Produção • Romaneio por Caixa</h2>
-        <?php if (!empty($prodRomVarietyNames)): ?>
-        <div class="mb-3">
-          <p class="text-[11px] uppercase tracking-wide text-brand-muted">Variedades</p>
-          <div id="prodRomaneioVarietyPicker" class="mt-1 flex flex-wrap gap-2 text-xs"></div>
+        <div class="flex items-start justify-between gap-2 mb-1">
+          <h2 class="font-semibold">Produção • Romaneio por Caixa</h2>
+          <button id="btnProdRomFilters" type="button" class="inline-flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border border-brand-line bg-white text-brand-text hover:bg-brand-surface-strong shadow-sm transition">
+            <span aria-hidden="true" class="text-sm leading-none">&equiv;</span>
+            <span class="font-semibold">Filtros</span>
+          </button>
         </div>
-        <?php endif; ?>
         <canvas id="chartProdRomaneio"></canvas>
       </section>
       <?php endif; ?>
 
+
+      <div id="modalProdRom" class="modal-backdrop hidden">
+        <div class="modal-compact">
+          <div class="modal-head">
+            <h3>Filtros - Romaneio por Caixa</h3>
+            <button type="button" class="close-btn" data-close-modal="1" aria-label="Fechar">&times;</button>
+          </div>
+          <?php if (!empty($prodRomVarietyNames)): ?>
+          <div class="mb-3">
+            <p class="text-[11px] uppercase tracking-wide text-brand-muted">Variedades</p>
+            <div id="prodRomaneioVarietyPicker" class="mt-2 flex flex-wrap gap-2 text-xs"></div>
+          </div>
+          <?php endif; ?>
+          <div class="footer">
+            <button type="button" class="px-3 py-1.5 text-sm rounded-lg border border-brand-line text-brand-text hover:bg-brand-surface-strong" data-close-modal="1">Fechar</button>
+          </div>
+        </div>
+      </div>
       <?php if (in_array('secProdAting', $allowedSections, true)): ?>
       <section id="secProdAting" class="card rounded-xl2 bg-brand-surface p-5">
         <h2 class="font-semibold mb-1">Produção • Meta × Sacos Beneficiados/Dia</h2>
@@ -2019,6 +2127,10 @@ $mediaF19 = $avgOf($series['f19_dia']);
     f18TotalMean: f18TotalMean
   };
   const CH = {}; // refs dos gráficos
+  let logMeanMap = {}; // última média por tipo de veículo (logística)
+  let prodCarrMeanMap = {}; // última média por tipo - produção carregamento
+  let prodDescMeanMap = {}; // última média por tipo - produção descarregamento
+  let fazCarrMeanMap = {}; // última média por tipo - fazenda carregamento
 
   // ===== Ícones
   const ico = {
@@ -2256,6 +2368,20 @@ $mediaF19 = $avgOf($series['f19_dia']);
 
   graphsModal?.addEventListener('click', (e)=>{ if (e.target.classList.contains('modal-overlay')) closeModal(); });
 
+  function setupSimpleModal(btnId, modalId){
+    const btn = document.getElementById(btnId);
+    const modal = document.getElementById(modalId);
+    if (!btn || !modal) return;
+    const close = ()=> modal.classList.add('hidden');
+    modal.querySelectorAll('[data-close-modal]').forEach(el => el.addEventListener('click', close));
+    modal.addEventListener('click', (e)=>{ if (e.target === modal) close(); });
+    btn.addEventListener('click', ()=> modal.classList.remove('hidden'));
+  }
+
+  setupSimpleModal('btnComercialHojeFilters', 'modalComercialHoje');
+  setupSimpleModal('btnComercialOntemFilters', 'modalComercialOntem');
+  setupSimpleModal('btnProdRomFilters', 'modalProdRom');
+
   // Inclui sec=... no submit do cabeçalho
   document.querySelector('form[method="GET"]')?.addEventListener('submit',()=>{
     const hidden = document.getElementById('secHiddenInputs');
@@ -2327,25 +2453,47 @@ function avgNonNull(arr){
     return totalCnt ? (totalSum / totalCnt) : null;
   }
 
-  function buildTypeDatasets(types, dictMinSeries, keepIdx, labelsFiltered, colorFn, lineOpts = {}, meanPrefix = 'Média', labelFn = (t)=>t){
-    const ds = [];
-    const meanMap = {};
+function buildTypeDatasets(types, dictMinSeries, keepIdx, labelsFiltered, colorFn, lineOpts = {}, meanPrefix = 'Média', labelFn = (t)=>t, meanMode = 'period'){
+  const ds = [];
+  const meanMap = {};
 
-    for (const type of (types || [])){
-      const baseSeries = dictMinSeries?.[type] || [];
-      const serieMin = keepIdx ? sliceByIdx(baseSeries, keepIdx) : baseSeries;
-      const serieH = seriesMinToHours(serieMin);
-      const label = labelFn(type);
-      ds.push(mkLine(label, serieH, colorFn(type), 'y', lineOpts));
+  for (const type of (types || [])){
+    const baseSeries = dictMinSeries?.[type] || [];
+    const serieMin = keepIdx ? sliceByIdx(baseSeries, keepIdx) : baseSeries;
+    const serieH = seriesMinToHours(serieMin);
+    const label = labelFn(type);
+    ds.push(mkLine(label, serieH, colorFn(type), 'y', lineOpts));
 
+    const len = (labelsFiltered || []).length || serieMin.length;
+    let meanLineMin = new Array(len).fill(null);
+    if (meanMode === 'running') {
+      let sum = 0;
+      let cnt = 0;
+      meanLineMin = serieMin.map((v) => {
+        if (v == null || Number.isNaN(Number(v)) || Number(v) <= 0) return cnt ? (sum / cnt) : null;
+        sum += Number(v);
+        cnt += 1;
+        return sum / cnt;
+      });
+      // usa a última média válida para meta
+      let lastMean = null;
+      for (let i = meanLineMin.length - 1; i >= 0; i--) {
+        const v = meanLineMin[i];
+        if (v != null && !Number.isNaN(v)) { lastMean = v; break; }
+      }
+      meanMap[type] = lastMean;
+    } else {
       const meanMin = avgNonNull(serieMin);
       meanMap[type] = meanMin;
-      const meanLine = new Array(labelsFiltered.length).fill(minToHours(meanMin));
-      ds.push(mkLine(`${meanPrefix} ${label}`, meanLine, colorFn(type), 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }));
+      meanLineMin = new Array(len).fill(meanMin);
     }
 
-    return { datasets: ds, meanMap };
+    const meanLine = meanLineMin.map(minToHours);
+    ds.push(mkLine(`${meanPrefix} ${label}`, meanLine, colorFn(type), 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }));
   }
+
+  return { datasets: ds, meanMap };
+}
 
   // ======== Helpers Comercial por caixa =========
   function combineBoxSeries(seriesMap, countMap, selectedBoxes, len){
@@ -2564,12 +2712,6 @@ function updateProdRomaneioChart(){
     const mediaParadaF = avgNonNull(Sfil.p_parada_dia);
     const mediaAprovF = avgNonNull(Sfil.p_aprov_dia);
 
-    // LOGÍSTICA (2 veículos): média diária — MINUTOS
-    const logMeanTwo_min = sliceByIdx(BASE.logDailyMeanSel, keep);
-    const logSumSel_min  = sliceByIdx(BASE.logDailySumSel, keep);
-    const logCntSel_min  = sliceByIdx(BASE.logDailyCntSel, keep);
-    const mediaLogF      = avgFromSumCnt(logSumSel_min, logCntSel_min);
-
     // ===== SAFRA KPI (recalcula no recorte) =====
     (function(){
       const metaF = sliceByIdx(BASE.metaSeriesByDay, keep);
@@ -2732,10 +2874,11 @@ if (can) {
       setMetaMoney(document.getElementById('com-ontem-meta'), medW);
     }
 
-    // ===== Logística (2 veículos + média) — HORAS
+    // ===== Logística (por veículo + médias individuais) – HORAS
     if (CH.logistica){
       CH.logistica.data.labels = L;
-      const { datasets, meanMap } = buildTypeDatasets(BASE.typesLogSel || [], BASE.logTiposSel || {}, keep, L, colorForLog);
+      const { datasets, meanMap } = buildTypeDatasets(BASE.typesLogSel || [], BASE.logTiposSel || {}, keep, L, colorForLog, {}, 'Média', (t)=>t, 'running');
+      logMeanMap = meanMap;
       CH.logistica.data.datasets = datasets;
 
       CH.logistica.update();
@@ -2781,8 +2924,13 @@ if (can) {
         BASE.prodCarrTipos || {},
         keep,
         L,
-        (t) => colorForType(t, false, false)
+        (t) => colorForType(t, false, false),
+        {},
+        'Média',
+        (t)=>t,
+        'running'
       );
+      prodCarrMeanMap = meanMap;
       CH.prodCarreg.data.datasets = datasets;
       CH.prodCarreg.update();
       setTypeMetaHours('prod-carr-meta', meanMap);
@@ -2796,8 +2944,13 @@ if (can) {
         BASE.prodDescTipos || {},
         keep,
         L,
-        (t) => colorForType(t, false, true)
+        (t) => colorForType(t, false, true),
+        {},
+        'Média',
+        (t)=>t,
+        'running'
       );
+      prodDescMeanMap = meanMap;
       CH.prodDesc.data.datasets = datasets;
       CH.prodDesc.update();
       setTypeMetaHours('prod-desc-meta', meanMap);
@@ -2832,9 +2985,11 @@ if (can) {
         (t) => colorForType(t, true),
         { borderWidth:3 },
         'Média',
-        (t) => `${t} (total/dia)`
+        (t) => `${t} (total/dia)`,
+        'running'
       );
 
+      fazCarrMeanMap = meanMap;
       CH.fazCarr.data.datasets = datasets;
       CH.fazCarr.update();
 
@@ -3278,7 +3433,7 @@ Chart.register(noDataPlugin);
   });
 })();
 
-  // ===== LOGÍSTICA (2 veículos + média) — HORAS
+  // ===== LOGÍSTICA (por veículo + médias individuais) – HORAS
   (function(){
     const el = document.getElementById('chartLogistica');
     if (!el) return;
@@ -3289,8 +3444,13 @@ Chart.register(noDataPlugin);
       BASE.logTiposSel || {},
       null,
       labels,
-      colorForLog
+      colorForLog,
+      {},
+      'Média',
+      (t)=>t,
+      'running'
     );
+    logMeanMap = meanMap;
     CH.logistica.data.datasets = datasets; CH.logistica.update();
 
     setTypeMetaHours('log-meta', meanMap);
@@ -3448,7 +3608,7 @@ Chart.register(noDataPlugin);
     setProdMetaSummary(realSeries, metaSeries);
   })();
 
-  // ===== Produção: Carregamento — HORAS
+  // ===== Produção: Carregamento – HORAS
   (function(){
     const el = document.getElementById('chartProdCarreg');
     if (!el) return;
@@ -3458,29 +3618,57 @@ Chart.register(noDataPlugin);
       BASE.prodCarrTipos || {},
       null,
       labels,
-      (t) => colorForType(t, false, false)
+      (t) => colorForType(t, false, false),
+      {},
+      'Média',
+      (t)=>t,
+      'running'
     );
+    prodCarrMeanMap = meanMap;
     CH.prodCarreg.data.datasets = datasets; CH.prodCarreg.update();
     setTypeMetaHours('prod-carr-meta', meanMap);
   })();
 
-  // ===== Produção: Descarregamento — HORAS
+  // ===== Produção: Descarregamento – HORAS
   (function(){
     const el = document.getElementById('chartProdDesc');
     if (!el) return;
-    CH.prodDesc = new Chart(el, { data:{ labels, datasets:[] }, options:{ ...hoursOpts, plugins:{ ...hoursOpts.plugins, legend:{ position:'bottom', labels:{ boxWidth:12 } } } } });
+    CH.prodDesc = new Chart(el, {
+      data:{ labels, datasets:[] },
+      options:{
+        ...hoursOpts,
+        plugins:{ ...hoursOpts.plugins, legend:{ position:'bottom', labels:{ boxWidth:12 } } },
+        scales:{
+          ...hoursOpts.scales,
+          x:{
+            ...(hoursOpts.scales?.x || {}),
+            ticks:{
+              ...(hoursOpts.scales?.x?.ticks || {}),
+              autoSkip:false,
+              maxRotation:0,
+              minRotation:0
+            }
+          }
+        }
+      }
+    });
     const { datasets, meanMap } = buildTypeDatasets(
       BASE.typesProdDesc || [],
       BASE.prodDescTipos || {},
       null,
       labels,
-      (t) => colorForType(t, false, true)
+      (t) => colorForType(t, false, true),
+      {},
+      'Média',
+      (t)=>t,
+      'running'
     );
+    prodDescMeanMap = meanMap;
     CH.prodDesc.data.datasets = datasets; CH.prodDesc.update();
     setTypeMetaHours('prod-desc-meta', meanMap);
   })();
 
-  // ===== Produção: Máquina parada — HORAS
+  // ===== Produção: Máquina parada – HORAS
   (function(){
     const el = document.getElementById('chartProdParada');
     if (!el) return;
@@ -3537,9 +3725,11 @@ Chart.register(noDataPlugin);
       (t) => colorForType(t, true),
       { borderWidth:3 },
       'Média',
-      (t) => `${t} (total/dia)`
+      (t) => `${t} (total/dia)`,
+      'running'
     );
 
+    fazCarrMeanMap = meanMap;
     CH.fazCarr = new Chart(el, {
       data:{ labels, datasets },
       options:{ ...hoursOpts, plugins:{ ...hoursOpts.plugins, legend:{ position:'bottom', labels:{ boxWidth:12 } } } }
@@ -3675,11 +3865,15 @@ Chart.register(noDataPlugin);
   applySecFilter();
 
   // Metas iniciais em HORAS para os gráficos de tempo
-  setMetaHours('log-meta', BASE.mediaLogSel);
-  setMetaHours('prod-carr-meta', <?php echo json_encode($mediaTMC_period, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>);
-  setMetaHours('prod-desc-meta', <?php echo json_encode($mediaTMD_period, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>);
+  setTypeMetaHours('log-meta', logMeanMap);
+  setTypeMetaHours('prod-carr-meta', prodCarrMeanMap);
+  setTypeMetaHours('prod-desc-meta', prodDescMeanMap);
   setMetaHours('prod-parada-meta', <?php echo json_encode($mediaParada, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>);
   // Fazenda carregamento é setado no bloco do chart após calcular média diária
 </script>
 </body>
 </html>
+
+
+
+
