@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 require_once __DIR__ . '/auth.php';
 require_auth(); // força login
 require_once __DIR__ . '/db.php';
@@ -258,7 +258,7 @@ $F_DESC_HHMM = "JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.fazenda.descarregament
 
 $sql = "
   SELECT
-    id, ref_date, payload_json,
+    id, ref_date, DATE(created_at) AS created_day, payload_json,
     NULLIF(
       COALESCE(
         CAST(JSON_UNQUOTE(JSON_EXTRACT(payload_json,'$.logistica.tempo_transporte_min')) AS DECIMAL(10,3)),
@@ -479,6 +479,8 @@ $allTypesFaz       = [];
 
 foreach ($rows as $r) {
   $d = $r['ref_date'];
+  $descDay = $r['created_day'] ?? $d;
+  if (!is_string($descDay) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $descDay)) $descDay = $d;
   if (!isset($byDay[$d])) $byDay[$d] = ['override'=>[], 'sum'=>[], 'avg'=>[]];
 
   $payload = json_decode($r['payload_json'] ?? 'null', true) ?: [];
@@ -557,9 +559,9 @@ foreach ($rows as $r) {
       $min  = any_to_min($it['min'] ?? $it['tmd_min'] ?? $it['hhmm'] ?? $it['tmd_hhmm'] ?? null);
       if ($min===null || $min<=0) continue;
       $allTypesProdDesc[$tipo] = true;
-      if (!isset($prodDescByType[$d][$tipo])) $prodDescByType[$d][$tipo] = ['sum'=>0.0,'cnt'=>0];
-      $prodDescByType[$d][$tipo]['sum'] += (float)$min;
-      $prodDescByType[$d][$tipo]['cnt'] += 1;
+      if (!isset($prodDescByType[$descDay][$tipo])) $prodDescByType[$descDay][$tipo] = ['sum'=>0.0,'cnt'=>0];
+      $prodDescByType[$descDay][$tipo]['sum'] += (float)$min;
+      $prodDescByType[$descDay][$tipo]['cnt'] += 1;
     }
   }
 
@@ -647,6 +649,12 @@ foreach ($byDay as $d => $bucket) {
   foreach ($metricsOverride as $m) {
     $series[$m][] = isset($bucket['override'][$m]) ? round((float)$bucket['override'][$m], 3) : null;
   }
+}
+ksort($prodDescByType);
+$labelsProdDescISO = array_keys($prodDescByType);
+$labelsProdDesc    = [];
+foreach ($labelsProdDescISO as $dDesc) {
+  $labelsProdDesc[] = (new DateTime($dDesc))->format('d/m');
 }
 
 /* =======================
@@ -1263,32 +1271,6 @@ foreach (array_keys($byDay) as $d) {
     $prodCarrDailyCntArr[] = null;
   }
 
-  $dailyDescSum = 0.0; $dailyDescCnt = 0;
-  foreach ($typesProdDesc as $t) {
-    $entry = $prodDescByType[$d][$t] ?? null;
-    $cnt   = $entry['cnt'] ?? 0;
-    if ($cnt > 0) {
-      $sum = (float)$entry['sum'];
-      $val = round($sum / $cnt, 3);
-      $dailyDescSum += $sum;
-      $dailyDescCnt += (int)$cnt;
-    } else {
-      $val = null;
-    }
-    $seriesProdDescTipos[$t][] = $val;
-  }
-  if ($dailyDescCnt > 0) {
-    $prodDescDailyMeanSeries[] = round($dailyDescSum / $dailyDescCnt, 3);
-    $prodDescDailySumArr[] = round($dailyDescSum, 3);
-    $prodDescDailyCntArr[] = (int)$dailyDescCnt;
-    $totalDescSum += $dailyDescSum;
-    $totalDescCnt += $dailyDescCnt;
-  } else {
-    $prodDescDailyMeanSeries[] = null;
-    $prodDescDailySumArr[] = null;
-    $prodDescDailyCntArr[] = null;
-  }
-
   foreach ($typesFaz as $t) {
     $entry = $fazCarrByType[$d][$t] ?? null;
     $cnt   = $entry['cnt'] ?? 0;
@@ -1324,6 +1306,34 @@ foreach (array_keys($byDay) as $d) {
     $logDailyMeanSeries[] = null;
     $logDailySumArr[] = null;
     $logDailyCntArr[] = null;
+  }
+}
+
+foreach ($labelsProdDescISO as $dDesc) {
+  $dailyDescSum = 0.0; $dailyDescCnt = 0;
+  foreach ($typesProdDesc as $t) {
+    $entry = $prodDescByType[$dDesc][$t] ?? null;
+    $cnt   = $entry['cnt'] ?? 0;
+    if ($cnt > 0) {
+      $sum = (float)$entry['sum'];
+      $val = round($sum / $cnt, 3);
+      $dailyDescSum += $sum;
+      $dailyDescCnt += (int)$cnt;
+    } else {
+      $val = null;
+    }
+    $seriesProdDescTipos[$t][] = $val;
+  }
+  if ($dailyDescCnt > 0) {
+    $prodDescDailyMeanSeries[] = round($dailyDescSum / $dailyDescCnt, 3);
+    $prodDescDailySumArr[] = round($dailyDescSum, 3);
+    $prodDescDailyCntArr[] = (int)$dailyDescCnt;
+    $totalDescSum += $dailyDescSum;
+    $totalDescCnt += $dailyDescCnt;
+  } else {
+    $prodDescDailyMeanSeries[] = null;
+    $prodDescDailySumArr[] = null;
+    $prodDescDailyCntArr[] = null;
   }
 }
 
@@ -1936,6 +1946,8 @@ $mediaF19 = $avgOf($series['f19_dia']);
 
   // ===== Dados do PHP =====
   const labels  = <?php echo json_encode($labels, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const labelsProdDesc = <?php echo json_encode($labelsProdDesc, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const labelsProdDescISO = <?php echo json_encode($labelsProdDescISO, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const S       = <?php echo json_encode($series, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
 
   // Comercial HOJE
@@ -2043,6 +2055,8 @@ $mediaF19 = $avgOf($series['f19_dia']);
   const BASE = {
     labels: [...labels],
     labelsISO: [...labelsISO],
+    labelsProdDesc: [...labelsProdDesc],
+    labelsProdDescISO: [...labelsProdDescISO],
     S: JSON.parse(JSON.stringify(S)),
 
     // Comercial HOJE
@@ -2494,7 +2508,6 @@ function buildTypeDatasets(types, dictMinSeries, keepIdx, labelsFiltered, colorF
 
   return { datasets: ds, meanMap };
 }
-
   // ======== Helpers Comercial por caixa =========
   function combineBoxSeries(seriesMap, countMap, selectedBoxes, len){
     const boxes = (selectedBoxes && selectedBoxes.length)
@@ -2693,13 +2706,17 @@ function updateProdRomaneioChart(){
     const keep   = idxRangeByDateISO(BASE.labelsISO,    dFrom, dTo);
     const keepH  = idxRangeByDateISO(BASE.labelsCISO_H, dFrom, dTo);
     const keepO  = idxRangeByDateISO(BASE.labelsCISO_O, dFrom, dTo);
+    const hasProdDescLabels = (BASE.labelsProdDescISO || []).length > 0;
+    const keepDesc = idxRangeByDateISO(hasProdDescLabels ? BASE.labelsProdDescISO : BASE.labelsISO, dFrom, dTo);
     window._keepIdx  = keep;
     window._keepIdxH = keepH;
     window._keepIdxO = keepO;
+    window._keepIdxDesc = keepDesc;
 
     const L   = sliceByIdx(BASE.labels,  keep);
     const LCH = sliceByIdx(BASE.labelsC_H, keepH);
     const LCO = sliceByIdx(BASE.labelsC_O, keepO);
+    const LDesc = hasProdDescLabels ? sliceByIdx(BASE.labelsProdDesc, keepDesc) : L;
 
     const Sfil = {};
     for (const k of Object.keys(BASE.S)) Sfil[k] = sliceByIdx(BASE.S[k], keep);
@@ -2938,12 +2955,12 @@ if (can) {
 
     // Produção Descarregamento — HORAS
     if (CH.prodDesc){
-      CH.prodDesc.data.labels = L;
+      CH.prodDesc.data.labels = LDesc;
       const { datasets, meanMap } = buildTypeDatasets(
         BASE.typesProdDesc || [],
         BASE.prodDescTipos || {},
-        keep,
-        L,
+        keepDesc,
+        LDesc,
         (t) => colorForType(t, false, true),
         {},
         'Média',
@@ -3633,8 +3650,9 @@ Chart.register(noDataPlugin);
   (function(){
     const el = document.getElementById('chartProdDesc');
     if (!el) return;
+    const lblDesc = (labelsProdDesc && labelsProdDesc.length) ? labelsProdDesc : labels;
     CH.prodDesc = new Chart(el, {
-      data:{ labels, datasets:[] },
+      data:{ labels: lblDesc, datasets:[] },
       options:{
         ...hoursOpts,
         plugins:{ ...hoursOpts.plugins, legend:{ position:'bottom', labels:{ boxWidth:12 } } },
@@ -3656,14 +3674,14 @@ Chart.register(noDataPlugin);
       BASE.typesProdDesc || [],
       BASE.prodDescTipos || {},
       null,
-      labels,
+      lblDesc,
       (t) => colorForType(t, false, true),
       {},
       'Média',
       (t)=>t,
       'running'
     );
-    prodDescMeanMap = meanMap;
+        prodDescMeanMap = meanMap;
     CH.prodDesc.data.datasets = datasets; CH.prodDesc.update();
     setTypeMetaHours('prod-desc-meta', meanMap);
   })();
@@ -3873,6 +3891,8 @@ Chart.register(noDataPlugin);
 </script>
 </body>
 </html>
+
+
 
 
 
