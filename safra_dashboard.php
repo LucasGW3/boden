@@ -2086,6 +2086,19 @@ $mediaF19 = $avgOf($series['f19_dia']);
     const hhmm = minutesToHHMM(minutesVal);
     el.textContent = `• Média no período: ${hh.toLocaleString('pt-BR',{ minimumFractionDigits:2, maximumFractionDigits:3 })} h${hhmm?` (${hhmm})`:''}`;
   }
+  function setTypeMetaHours(elId, meanMap){
+    const el = document.getElementById(elId);
+    if (!el) return;
+    const entries = Object.entries(meanMap || {}).filter(([, v]) => v != null && !Number.isNaN(v));
+    if (!entries.length) { el.textContent = '—'; return; }
+
+    const parts = entries.map(([type, min]) => {
+      const hours = Number(min) / 60;
+      return `${type}: ${hours.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 3 })} h`;
+    });
+
+    el.textContent = '• ' + parts.join(' • ');
+  }
   function setMetaMoney(el, val) {
     if (!el) return;
     el.textContent = (val == null || isNaN(val))
@@ -2298,11 +2311,11 @@ function avgNonNull(arr){
   return c ? (s / c) : null;
 }
 
-function avgFromSumCnt(sumArr, cntArr){
-  let totalSum = 0, totalCnt = 0;
-  const len = Math.min(sumArr ? sumArr.length : 0, cntArr ? cntArr.length : 0);
-  for (let i=0; i<len; i++) {
-    const sumVal = sumArr[i];
+  function avgFromSumCnt(sumArr, cntArr){
+    let totalSum = 0, totalCnt = 0;
+    const len = Math.min(sumArr ? sumArr.length : 0, cntArr ? cntArr.length : 0);
+    for (let i=0; i<len; i++) {
+      const sumVal = sumArr[i];
     const cntVal = cntArr[i];
     if (sumVal == null || cntVal == null) continue;
     const s = Number(sumVal);
@@ -2310,14 +2323,34 @@ function avgFromSumCnt(sumArr, cntArr){
     if (Number.isNaN(s) || Number.isNaN(c) || c <= 0) continue;
     totalSum += s;
     totalCnt += c;
+        }
+    return totalCnt ? (totalSum / totalCnt) : null;
   }
-  return totalCnt ? (totalSum / totalCnt) : null;
-}
 
-// ======== Helpers Comercial por caixa =========
-function combineBoxSeries(seriesMap, countMap, selectedBoxes, len){
-  const boxes = (selectedBoxes && selectedBoxes.length)
-    ? selectedBoxes
+  function buildTypeDatasets(types, dictMinSeries, keepIdx, labelsFiltered, colorFn, lineOpts = {}, meanPrefix = 'Média', labelFn = (t)=>t){
+    const ds = [];
+    const meanMap = {};
+
+    for (const type of (types || [])){
+      const baseSeries = dictMinSeries?.[type] || [];
+      const serieMin = keepIdx ? sliceByIdx(baseSeries, keepIdx) : baseSeries;
+      const serieH = seriesMinToHours(serieMin);
+      const label = labelFn(type);
+      ds.push(mkLine(label, serieH, colorFn(type), 'y', lineOpts));
+
+      const meanMin = avgNonNull(serieMin);
+      meanMap[type] = meanMin;
+      const meanLine = new Array(labelsFiltered.length).fill(minToHours(meanMin));
+      ds.push(mkLine(`${meanPrefix} ${label}`, meanLine, colorFn(type), 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }));
+    }
+
+    return { datasets: ds, meanMap };
+  }
+
+  // ======== Helpers Comercial por caixa =========
+  function combineBoxSeries(seriesMap, countMap, selectedBoxes, len){
+    const boxes = (selectedBoxes && selectedBoxes.length)
+      ? selectedBoxes
     : Object.keys(seriesMap || {});
   const sum = new Array(len).fill(0);
   const weights = new Array(len).fill(0);
@@ -2531,16 +2564,6 @@ function updateProdRomaneioChart(){
     const mediaParadaF = avgNonNull(Sfil.p_parada_dia);
     const mediaAprovF = avgNonNull(Sfil.p_aprov_dia);
 
-    // PRODUÇÃO: médias diárias (entre tipos) re-filtradas — MINUTOS
-    const prodCarrMeanF_min = sliceByIdx(BASE.prodCarrDailyMean, keep);
-    const prodDescMeanF_min = sliceByIdx(BASE.prodDescDailyMean, keep);
-    const prodCarrSumF_min  = sliceByIdx(BASE.prodCarrDailySum, keep);
-    const prodCarrCntF_min  = sliceByIdx(BASE.prodCarrDailyCnt, keep);
-    const prodDescSumF_min  = sliceByIdx(BASE.prodDescDailySum, keep);
-    const prodDescCntF_min  = sliceByIdx(BASE.prodDescDailyCnt, keep);
-    const mediaTMCF_min     = avgFromSumCnt(prodCarrSumF_min, prodCarrCntF_min);
-    const mediaTMDF_min     = avgFromSumCnt(prodDescSumF_min, prodDescCntF_min);
-
     // LOGÍSTICA (2 veículos): média diária — MINUTOS
     const logMeanTwo_min = sliceByIdx(BASE.logDailyMeanSel, keep);
     const logSumSel_min  = sliceByIdx(BASE.logDailySumSel, keep);
@@ -2712,17 +2735,11 @@ if (can) {
     // ===== Logística (2 veículos + média) — HORAS
     if (CH.logistica){
       CH.logistica.data.labels = L;
-
-      for (let i=0;i<BASE.typesLogSel.length;i++){
-        const key = BASE.typesLogSel[i];
-        const serie = seriesMinToHours(sliceByIdx(BASE.logTiposSel[key] || [], keep));
-        CH.logistica.data.datasets[i].data = serie;
-      }
-      const idxMean = CH.logistica.data.datasets.length-1;
-      CH.logistica.data.datasets[idxMean].data = seriesMinToHours(logMeanTwo_min);
+      const { datasets, meanMap } = buildTypeDatasets(BASE.typesLogSel || [], BASE.logTiposSel || {}, keep, L, colorForLog);
+      CH.logistica.data.datasets = datasets;
 
       CH.logistica.update();
-      setMetaHours('log-meta', mediaLogF);
+      setTypeMetaHours('log-meta', meanMap);
     }
 
     // Qualidade
@@ -2759,29 +2776,31 @@ if (can) {
     // Produção Carregamento — HORAS
     if (CH.prodCarreg){
       CH.prodCarreg.data.labels = L;
-      for (let i=0;i<BASE.typesProd.length;i++){
-        const key = BASE.typesProd[i];
-        const serie = seriesMinToHours(sliceByIdx(BASE.prodCarrTipos[key], keep));
-        CH.prodCarreg.data.datasets[i].data = serie;
-      }
-      const idxMean = CH.prodCarreg.data.datasets.length-1;
-      CH.prodCarreg.data.datasets[idxMean].data = seriesMinToHours(prodCarrMeanF_min);
+      const { datasets, meanMap } = buildTypeDatasets(
+        BASE.typesProd || [],
+        BASE.prodCarrTipos || {},
+        keep,
+        L,
+        (t) => colorForType(t, false, false)
+      );
+      CH.prodCarreg.data.datasets = datasets;
       CH.prodCarreg.update();
-      setMetaHours('prod-carr-meta', mediaTMCF_min);
+      setTypeMetaHours('prod-carr-meta', meanMap);
     }
 
     // Produção Descarregamento — HORAS
     if (CH.prodDesc){
       CH.prodDesc.data.labels = L;
-      for (let i=0;i<BASE.typesProdDesc.length;i++){
-        const key = BASE.typesProdDesc[i];
-        const serie = seriesMinToHours(sliceByIdx(BASE.prodDescTipos[key], keep));
-        CH.prodDesc.data.datasets[i].data = serie;
-      }
-      const idxMean = CH.prodDesc.data.datasets.length-1;
-      CH.prodDesc.data.datasets[idxMean].data = seriesMinToHours(prodDescMeanF_min);
+      const { datasets, meanMap } = buildTypeDatasets(
+        BASE.typesProdDesc || [],
+        BASE.prodDescTipos || {},
+        keep,
+        L,
+        (t) => colorForType(t, false, true)
+      );
+      CH.prodDesc.data.datasets = datasets;
       CH.prodDesc.update();
-      setMetaHours('prod-desc-meta', mediaTMDF_min);
+      setTypeMetaHours('prod-desc-meta', meanMap);
     }
 
     if (CH.prodParada){
@@ -2805,24 +2824,21 @@ if (can) {
     // ===== Fazenda Carregamento — HORAS (DINÂMICO POR TIPO + média diária)
     if (CH.fazCarr){
       CH.fazCarr.data.labels = L;
+      const { datasets, meanMap } = buildTypeDatasets(
+        BASE.typesFaz || [],
+        BASE.fazCarrTipos || {},
+        keep,
+        L,
+        (t) => colorForType(t, true),
+        { borderWidth:3 },
+        'Média',
+        (t) => `${t} (total/dia)`
+      );
 
-      const ds = [];
-      for (const typeName of BASE.typesFaz){
-        const serieH = seriesMinToHours(sliceByIdx(BASE.fazCarrTipos[typeName] || [], keep));
-        ds.push(mkLine(`${typeName} (total/dia)`, serieH, colorForType(typeName, true), 'y', { borderWidth:3 }));
-      }
-
-      const dailyMeanH = seriesMinToHours(sliceByIdx(BASE.fazCarrDailyMean, keep));
-      ds.push(mkLine('Média diária (Fazenda • Carregamento)', dailyMeanH, THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }));
-
-      CH.fazCarr.data.datasets = ds;
+      CH.fazCarr.data.datasets = datasets;
       CH.fazCarr.update();
 
-      const rawSumSel = sliceByIdx(BASE.fazCarrRawSum, keep);
-      const rawCntSel = sliceByIdx(BASE.fazCarrRawCnt, keep);
-      const mediaPeriodoMin = avgFromSumCnt(rawSumSel, rawCntSel);
-
-      setMetaHours('faz-carreg-meta', mediaPeriodoMin);
+      setTypeMetaHours('faz-carreg-meta', meanMap);
     }
 
     // Pessoas
@@ -3268,11 +3284,16 @@ Chart.register(noDataPlugin);
     if (!el) return;
     CH.logistica = new Chart(el, { data:{ labels, datasets:[] }, options:{ ...hoursOpts, plugins:{ ...hoursOpts.plugins, legend:{ position:'bottom', labels:{ boxWidth:12 } } } } });
 
-    const ds = (BASE.typesLogSel || []).map(k => ({ ...mkLine(k, seriesMinToHours(BASE.logTiposSel[k]||[]), colorForLog(k), 'y') }));
-    ds.push(mkLine('Média (Carreta LS + Truck)', seriesMinToHours(BASE.logDailyMeanSel), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 } ));
-    CH.logistica.data.datasets = ds; CH.logistica.update();
+      const { datasets, meanMap } = buildTypeDatasets(
+      BASE.typesLogSel || [],
+      BASE.logTiposSel || {},
+      null,
+      labels,
+      colorForLog
+    );
+    CH.logistica.data.datasets = datasets; CH.logistica.update();
 
-    setMetaHours('log-meta', BASE.mediaLogSel);
+    setTypeMetaHours('log-meta', meanMap);
   })();
 
   // ===== Qualidade (3 gráficos)
@@ -3432,10 +3453,15 @@ Chart.register(noDataPlugin);
     const el = document.getElementById('chartProdCarreg');
     if (!el) return;
     CH.prodCarreg = new Chart(el, { data:{ labels, datasets:[] }, options:{ ...hoursOpts, plugins:{ ...hoursOpts.plugins, legend:{ position:'bottom', labels:{ boxWidth:12 } } } } });
-    const ds = typesProd.map(k => ({ ...mkLine(k, seriesMinToHours(prodCarrTipos[k]||[]), (colorForType(k, false, false)), 'y') }));
-    ds.push(mkLine('Média diária (entre tipos)', seriesMinToHours(BASE.prodCarrDailyMean), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 } ));
-    CH.prodCarreg.data.datasets = ds; CH.prodCarreg.update();
-    setMetaHours('prod-carr-meta', <?php echo json_encode($mediaTMC_period, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>);
+    const { datasets, meanMap } = buildTypeDatasets(
+      BASE.typesProd || [],
+      BASE.prodCarrTipos || {},
+      null,
+      labels,
+      (t) => colorForType(t, false, false)
+    );
+    CH.prodCarreg.data.datasets = datasets; CH.prodCarreg.update();
+    setTypeMetaHours('prod-carr-meta', meanMap);
   })();
 
   // ===== Produção: Descarregamento — HORAS
@@ -3443,10 +3469,15 @@ Chart.register(noDataPlugin);
     const el = document.getElementById('chartProdDesc');
     if (!el) return;
     CH.prodDesc = new Chart(el, { data:{ labels, datasets:[] }, options:{ ...hoursOpts, plugins:{ ...hoursOpts.plugins, legend:{ position:'bottom', labels:{ boxWidth:12 } } } } });
-    const ds = typesProdDesc.map(k => ({ ...mkLine(k, seriesMinToHours(prodDescTipos[k]||[]), (colorForType(k, false, true)), 'y') }));
-    ds.push(mkLine('Média diária (entre tipos)', seriesMinToHours(BASE.prodDescDailyMean), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 } ));
-    CH.prodDesc.data.datasets = ds; CH.prodDesc.update();
-    setMetaHours('prod-desc-meta', <?php echo json_encode($mediaTMD_period, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>);
+    const { datasets, meanMap } = buildTypeDatasets(
+      BASE.typesProdDesc || [],
+      BASE.prodDescTipos || {},
+      null,
+      labels,
+      (t) => colorForType(t, false, true)
+    );
+    CH.prodDesc.data.datasets = datasets; CH.prodDesc.update();
+    setTypeMetaHours('prod-desc-meta', meanMap);
   })();
 
   // ===== Produção: Máquina parada — HORAS
@@ -3498,35 +3529,23 @@ Chart.register(noDataPlugin);
     const el = document.getElementById('chartFazendaCarreg');
     if (!el) return;
 
-    const ds = [];
-    const perTypeSeriesH = [];
-    for (const typeName of BASE.typesFaz){
-      const serieH = seriesMinToHours(BASE.fazCarrTipos[typeName] || new Array(labels.length).fill(null));
-      perTypeSeriesH.push(serieH);
-      ds.push(mkLine(`${typeName} (total/dia)`, serieH, colorForType(typeName, true), 'y', { borderWidth:3 }));
-    }
-
-    const dailyMeanH = labels.map((_, i) => {
-      const vals = perTypeSeriesH
-        .map(s => s[i])
-        .filter(v => v != null && !Number.isNaN(v) && Number(v) > 0);
-      return vals.length ? (vals.reduce((a,b)=>a+Number(b),0) / vals.length) : null;
-    });
-
-    const mediaPeriodoMin = (function(arrH){
-      let s=0,c=0; for(const v of arrH){ if(v!=null && !Number.isNaN(v)){ s+=Number(v); c++; } }
-      const mediaH = c? (s/c) : null;
-      return mediaH==null? null : mediaH*60;
-    })(dailyMeanH);
-
-    ds.push(mkLine('Média diária (Fazenda • Carregamento)', dailyMeanH, THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }));
+    const { datasets, meanMap } = buildTypeDatasets(
+      BASE.typesFaz || [],
+      BASE.fazCarrTipos || {},
+      null,
+      labels,
+      (t) => colorForType(t, true),
+      { borderWidth:3 },
+      'Média',
+      (t) => `${t} (total/dia)`
+    );
 
     CH.fazCarr = new Chart(el, {
-      data:{ labels, datasets: ds },
+      data:{ labels, datasets },
       options:{ ...hoursOpts, plugins:{ ...hoursOpts.plugins, legend:{ position:'bottom', labels:{ boxWidth:12 } } } }
     });
 
-    setMetaHours('faz-carreg-meta', mediaPeriodoMin);
+    setTypeMetaHours('faz-carreg-meta', meanMap);
   })();
 
   // ===== Pessoas (F17)
