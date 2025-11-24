@@ -803,20 +803,6 @@ while ($row = $cStmt->fetch(PDO::FETCH_ASSOC)) {
     if ($variedade === '') $variedade = 'Sem variedade';
     $comVarietySet[$variedade] = true;
 
-    $qtyRaw = $v['qntd_venda_kg']
-      ?? $v['qntd_venda']
-      ?? $v['qntd']
-      ?? $v['quantidade']
-      ?? $v['kg']
-      ?? null;
-    if (is_array($qtyRaw)) {
-      $qtyRaw = $qtyRaw['valor'] ?? reset($qtyRaw);
-    }
-    $qty = parse_money_br($qtyRaw);
-    if ($qty === null || $qty <= 0) {
-      continue;
-    }
-
     // ----- valores de HOJE (qualquer uma das chaves abaixo)
     $candidatosHoje = [
       $v['preco']        ?? null,
@@ -827,18 +813,18 @@ while ($row = $cStmt->fetch(PDO::FETCH_ASSOC)) {
     foreach ($candidatosHoje as $raw) {
       $num = parse_money_br($raw);
       if ($num !== null && $num > 0) {
-        $comHojeByDate[$d]['sum'] += $num * $qty;
-        $comHojeByDate[$d]['cnt'] += $qty;
+        $comHojeByDate[$d]['sum'] += $num;
+        $comHojeByDate[$d]['cnt'] += 1;
          if (!isset($comHojeByBox[$caixa])) $comHojeByBox[$caixa] = [];
         if (!isset($comHojeByBox[$caixa][$d])) $comHojeByBox[$caixa][$d] = ['sum' => 0.0, 'cnt' => 0];
-        $comHojeByBox[$caixa][$d]['sum'] += $num * $qty;
-        $comHojeByBox[$caixa][$d]['cnt'] += $qty;
+        $comHojeByBox[$caixa][$d]['sum'] += $num;
+        $comHojeByBox[$caixa][$d]['cnt'] += 1;
 
         if (!isset($comHojeByVarBox[$variedade])) $comHojeByVarBox[$variedade] = [];
         if (!isset($comHojeByVarBox[$variedade][$caixa])) $comHojeByVarBox[$variedade][$caixa] = [];
         if (!isset($comHojeByVarBox[$variedade][$caixa][$d])) $comHojeByVarBox[$variedade][$caixa][$d] = ['sum' => 0.0, 'cnt' => 0];
-        $comHojeByVarBox[$variedade][$caixa][$d]['sum'] += $num * $qty;
-        $comHojeByVarBox[$variedade][$caixa][$d]['cnt'] += $qty;
+        $comHojeByVarBox[$variedade][$caixa][$d]['sum'] += $num;
+        $comHojeByVarBox[$variedade][$caixa][$d]['cnt'] += 1;
 
         break; // considera uma por item
       }
@@ -853,19 +839,19 @@ while ($row = $cStmt->fetch(PDO::FETCH_ASSOC)) {
     foreach ($candidatosOntem as $raw) {
       $num = parse_money_br($raw);
       if ($num !== null && $num > 0) {
-        $comOntemByDate[$d]['sum'] += $num * $qty;
-        $comOntemByDate[$d]['cnt'] += $qty;
+        $comOntemByDate[$d]['sum'] += $num;
+        $comOntemByDate[$d]['cnt'] += 1;
 
         if (!isset($comOntemByBox[$caixa])) $comOntemByBox[$caixa] = [];
         if (!isset($comOntemByBox[$caixa][$d])) $comOntemByBox[$caixa][$d] = ['sum' => 0.0, 'cnt' => 0];
-        $comOntemByBox[$caixa][$d]['sum'] += $num * $qty;
-        $comOntemByBox[$caixa][$d]['cnt'] += $qty;
+        $comOntemByBox[$caixa][$d]['sum'] += $num;
+        $comOntemByBox[$caixa][$d]['cnt'] += 1;
 
         if (!isset($comOntemByVarBox[$variedade])) $comOntemByVarBox[$variedade] = [];
         if (!isset($comOntemByVarBox[$variedade][$caixa])) $comOntemByVarBox[$variedade][$caixa] = [];
         if (!isset($comOntemByVarBox[$variedade][$caixa][$d])) $comOntemByVarBox[$variedade][$caixa][$d] = ['sum' => 0.0, 'cnt' => 0];
-        $comOntemByVarBox[$variedade][$caixa][$d]['sum'] += $num * $qty;
-        $comOntemByVarBox[$variedade][$caixa][$d]['cnt'] += $qty;
+        $comOntemByVarBox[$variedade][$caixa][$d]['sum'] += $num;
+        $comOntemByVarBox[$variedade][$caixa][$d]['cnt'] += 1;
 
         break;
       }
@@ -921,10 +907,10 @@ foreach ($comBoxNames as $boxName) {
     $vals = $comHojeByBox[$boxName][$dateYmd] ?? null;
     if ($vals && $vals['cnt'] > 0) {
       $boxSeries[] = round($vals['sum'] / $vals['cnt'], 3);
-      $counts[] = (float)$vals['cnt'];
+      $counts[] = (int)$vals['cnt'];
     } else {
       $boxSeries[] = null;
-      $counts[] = 0.0;
+      $counts[] = 0;
     }
   }
   $comHojeBoxSeries[$boxName] = $boxSeries;
@@ -940,10 +926,10 @@ foreach ($comBoxNames as $boxName) {
     $vals = $comOntemByBox[$boxName][$dateYmd] ?? null;
     if ($vals && $vals['cnt'] > 0) {
       $boxSeries[] = round($vals['sum'] / $vals['cnt'], 3);
-      $counts[] = (float)$vals['cnt'];
+      $counts[] = (int)$vals['cnt'];
     } else {
       $boxSeries[] = null;
-      $counts[] = 0.0;
+      $counts[] = 0;
     }
   }
   $comOntemBoxSeries[$boxName] = $boxSeries;
@@ -962,10 +948,10 @@ foreach ($comVarietyNames as $varName) {
       $vals = $comHojeByVarBox[$varName][$boxName][$dateYmd] ?? null;
       if ($vals && $vals['cnt'] > 0) {
         $boxSeries[] = round($vals['sum'] / $vals['cnt'], 3);
-        $counts[] = (float)$vals['cnt'];
+        $counts[] = (int)$vals['cnt'];
       } else {
         $boxSeries[] = null;
-        $counts[] = 0.0;
+        $counts[] = 0;
       }
     }
     $comHojeVarBoxSeries[$varName][$boxName] = $boxSeries;
@@ -985,10 +971,10 @@ foreach ($comVarietyNames as $varName) {
       $vals = $comOntemByVarBox[$varName][$boxName][$dateYmd] ?? null;
       if ($vals && $vals['cnt'] > 0) {
         $boxSeries[] = round($vals['sum'] / $vals['cnt'], 3);
-        $counts[] = (float)$vals['cnt'];
+        $counts[] = (int)$vals['cnt'];
       } else {
         $boxSeries[] = null;
-        $counts[] = 0.0;
+        $counts[] = 0;
       }
     }
     $comOntemVarBoxSeries[$varName][$boxName] = $boxSeries;
@@ -1403,8 +1389,19 @@ $mediaF19 = $avgOf($series['f19_dia']);
   <title>Boden - Dashboard Geral</title>
   <link href="https://fonts.googleapis.com/css2?family=Cabin:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/png" sizes="96x96" href="./favicon-96x96.png">
-  <link rel="stylesheet" href="./dist/styles.css">
+  <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+  <script>
+    tailwind.config = {
+      theme: { extend: {
+        fontFamily: { sans: ['Nunito','ui-sans-serif','system-ui'] },
+        colors: { brand: { bg:'#F4F9F2', surface:'#FFFFFF', line:'#E5F2DE', primary:'#5FB141', primaryDark:'#3C8F28', text:'#273418', muted:'#7A8F6B' } },
+        borderRadius: { pill:'9999px', xl2:'1rem' },
+        boxShadow: { soft:'0 6px 18px rgba(60,143,40,0.08)' }
+      } }
+    }
+  </script>
   <style>
     body { background-color:#F9FAFB; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
     .card { border:1px solid rgb(229,242,222); box-shadow:0 6px 18px rgba(60,143,40,0.06); }
@@ -2661,14 +2658,14 @@ if (can) {
       }
 
       const { series: combinedFull, weights: weightsFull } = combineBoxSeries(BASE.comHojeBoxSeries, BASE.comHojeBoxCount, sel, BASE.labelsC_H.length);
-      const combined = sliceByIdx(combinedFull, keepH);
-      const qty      = sliceByIdx(weightsFull,  keepH);
+      const price = sliceByIdx(combinedFull, keepH);
+      const qty   = sliceByIdx(weightsFull,  keepH);
 
       const hasW  = sumNumbers(qty) > 0;
-      const medW  = hasW ? weightedMean(combined, qty) : null;
+      const medW  = hasW ? weightedMean(price, qty) : null;
 
       const meanDataset = CH.comercial.data.datasets[boxNames.length];
-      meanDataset.data = combined;
+      meanDataset.data = (medW!=null) ? new Array(LCH.length).fill(medW) : new Array(LCH.length).fill(null);
       meanDataset.hidden = false;
 
       CH.comercial.update();
@@ -2696,14 +2693,14 @@ if (can) {
       }
 
       const { series: combinedFull, weights: weightsFull } = combineBoxSeries(BASE.comOntemBoxSeries, BASE.comOntemBoxCount, sel, BASE.labelsC_O.length);
-      const combined = sliceByIdx(combinedFull, keepO);
-      const qty      = sliceByIdx(weightsFull,  keepO);
+      const price = sliceByIdx(combinedFull, keepO);
+      const qty   = sliceByIdx(weightsFull,  keepO);
 
       const hasW  = sumNumbers(qty) > 0;
-      const medW  = hasW ? weightedMean(combined, qty) : null;
+      const medW  = hasW ? weightedMean(price, qty) : null;
 
       const meanDataset = CH.comercialOntem.data.datasets[boxNames.length];
-      meanDataset.data = combined;
+      meanDataset.data = (medW!=null) ? new Array(LCO.length).fill(medW) : new Array(LCO.length).fill(null);
       meanDataset.hidden = false;
       CH.comercialOntem.update();
       setMetaMoney(document.getElementById('com-ontem-meta'), medW);
@@ -3123,7 +3120,9 @@ Chart.register(noDataPlugin);
     const medW = hasW ? weightedMean(combined, weights) : null;
 
     const meanDataset = CH.comercial.data.datasets[boxNames.length];
-    meanDataset.data = combined;
+    meanDataset.data = (medW != null)
+      ? new Array(labels.length).fill(medW)
+      : new Array(labels.length).fill(null);
     meanDataset.hidden = false;
 
     CH.comercial.update();
@@ -3207,7 +3206,9 @@ Chart.register(noDataPlugin);
     const medW = hasW ? weightedMean(combined, weights) : null;
 
     const meanDataset = CH.comercialOntem.data.datasets[boxNames.length];
-    meanDataset.data = combined;
+    meanDataset.data = (medW != null)
+      ? new Array(labels.length).fill(medW)
+      : new Array(labels.length).fill(null);
     meanDataset.hidden = false;
 
     CH.comercialOntem.update();

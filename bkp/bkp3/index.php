@@ -868,7 +868,17 @@ foreach ($tabOrder as $t) { if (!empty($can[$t])) { $defaultTab = $t; break; } }
   <title>Boden - Safra Cebola 25/26</title>
   <link href="https://fonts.googleapis.com/css2?family=Cabin:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/png" sizes="96x96" href="./favicon-96x96.png">
-  <link rel="stylesheet" href="./dist/styles.css">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: {
+        fontFamily: { sans: ['Nunito','ui-sans-serif','system-ui'] },
+        colors: { brand: { bg:'#F9FAFB', surface:'#FFFFFF', line:'#E0E7E0', primary:'#5FB141', primaryDark:'#3C8F28', text:'#273418', muted:'#6B7280' } },
+        borderRadius: { lg:'0.75rem', xl:'1rem', '2xl':'1.5rem' },
+        boxShadow: { 'soft-green':'0 10px 25px -5px rgba(95,177,65,.08), 0 4px 8px -1 rgba(95,177,65,.1)' }
+      } }
+    }
+  </script>
   <style>
     body { background-color:#F9FAFB; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
     input[type="number"]{ text-align:right; }
@@ -879,7 +889,7 @@ foreach ($tabOrder as $t) { if (!empty($can[$t])) { $defaultTab = $t; break; } }
   </style>
   <?php render_datepicker_assets(); ?>
 </head>
-<body class="text-brand-text">
+<body class="text-brand-text bg-brand-bg">
   <!-- Nav -->
  <?php render_boden_navbar('form'); ?>
   <div class="max-w-7xl mx-auto p-6 lg:p-10">
@@ -959,7 +969,6 @@ foreach ($tabOrder as $t) { if (!empty($can[$t])) { $defaultTab = $t; break; } }
               $rowsC_disp[] = [
                 'caixa'        => $r['caixa'] ?? '',
                 'variedade'    => $r['variedade'] ?? '',
-                'qntd_venda_kg'=> $r['qntd_venda_kg'] ?? ($r['qntd_venda'] ?? ($r['qntd'] ?? '')),
                 'preco_ontem'  => $r['preco_ontem'] ?? ($r['preco'] ?? ''),
                 'preco_hoje'   => $r['preco_hoje']  ?? '',
               ];
@@ -975,7 +984,7 @@ foreach ($tabOrder as $t) { if (!empty($can[$t])) { $defaultTab = $t; break; } }
               </span>
             </label>
           </div>
-         <?php echo render_rows_compact($rowsC_disp,[ 'caixa'=>'Caixa','variedade'=>'Variedade','qntd_venda_kg'=>'Qntd. Venda/Kg','preco_ontem'=>'Preço Ontem (R$)','preco_hoje'=>'Preço Hoje (R$)' ]); ?>
+          <?php echo render_rows_compact($rowsC_disp,[ 'caixa'=>'Caixa','variedade'=>'Variedade','preco_ontem'=>'Preço Ontem (R$)','preco_hoje'=>'Preço Hoje (R$)' ]); ?>
           <div id="cVendas" class="space-y-3 mt-3"></div>
           <input type="hidden" name="c_vendas" id="c_vendas_json" />
 
@@ -1477,7 +1486,6 @@ document.addEventListener('DOMContentLoaded', () => {
     cVendas: bindRepeater('cVendas','c_vendas_json',[
       { name:'caixa',        label:'Caixa',             type:'select', options: CAIXAS },
       { name:'variedade',    label:'Variedade',         type:'select', options: VARIEDADES },
-      { name:'qntd_venda_kg',label:'Qntd. Venda/Kg',    type:'number', attrs:{ step:'0.01', min:'0', inputmode:'decimal' } },
       { name:'preco_ontem',  label:'Preço Ontem (R$)',  type:'number', attrs:{ step:'0.01', min:'0', inputmode:'decimal' } },
       { name:'preco_hoje',   label:'Preço Hoje (R$)',   type:'number', attrs:{ step:'0.01', min:'0', inputmode:'decimal' } },
     ]),

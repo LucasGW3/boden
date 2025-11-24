@@ -1,0 +1,350 @@
+body {
+    font-family: 'Josefin Sans', sans-serif;
+    background-color: #f8f9fa;
+}
+
+.card.login-card {
+  opacity: 0;
+  transform: translateY(-30px);
+  transition: opacity 0.8s ease, transform 0.8s ease;
+}
+
+.card.login-card.aparecer {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.login-card {
+    max-width: 800px;
+    margin: 0 auto;
+    border-radius: 10px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.footer {
+    margin-top: 20px;
+    font-size: 0.9rem;
+}
+
+.btn-info {
+    background-color: #78be20;
+    color: white;
+    border-color: #78be20;
+    border-radius: 0.35rem;
+    transition: all 0.3s;
+}
+
+.btn-info:hover {
+    background-color: #035f1d;
+    border-color: #035f1d;
+    color: white;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.btn-outline-success {
+    background-color: #035f1d;
+    color: white;
+    border-color: #035f1d;
+    border-radius: 0.35rem;
+    padding: 0.5rem 1.5rem;
+    transition: all 0.3s;
+}
+
+.btn-outline-success:hover {
+    background-color: #78be20;
+    border-color: #78be20;
+    color: white;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.btn-portal {
+    background-color: #78be20;
+    color: white;
+    border-radius: 0.35rem;
+    padding: 0.5rem 1.5rem;
+    font-weight: 600;
+    transition: all 0.3s;
+    margin-right: 10px;
+}
+
+.btn-portal:hover {
+    background-color: #035f1d;
+    color: white;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.btn-secondary {
+    background-color: #6c757d;;
+    color: white;
+    border-radius: 0.35rem;
+    padding: 0.5rem 1.5rem;
+    font-weight: 600;
+    transition: all 0.3s;
+    margin-right: 10px;
+}
+
+.modal-header {
+    background-color: #78be20;
+}
+
+.btn-primary {
+    background-color: #e1b87f;
+    color: white;
+    border-color: #e1b87f;
+    border-radius: 0.35rem;
+    padding: 0.5rem 1.5rem;
+    font-weight: 600;
+    transition: all 0.3s;
+}
+
+.btn-primary:hover {
+    background-color: #c49758;
+    border-color: #c49758;
+    color: white;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.logo_branca {
+  max-height: 45px;
+  width: auto;
+  display: block;
+  margin-left: 10px;
+}
+
+.prioridade-cell .badge {
+  display: block;
+  width: 80%;
+  font-size: 1rem;
+  padding: 0.5em;
+}
+
+.logo {
+  max-height: 100px;
+  width: auto;
+  display: block;
+  margin: 0 auto 20px auto; /* Centraliza e adiciona margem inferior */
+  opacity: 0;
+  transform: translateY(-30px);
+  transition: opacity 0.8s ease, transform 0.8s ease;
+}
+
+.logo.aparecer {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+#toastVeiculo {
+  background-color: #78be20; /* Verde Bootstrap */
+  color: white;
+}
+
+#toastVeiculo .btn-close {
+  filter: brightness(0) invert(1); /* Deixa o "X" branco */
+}
+
+#toastAtualizacao {
+  background-color: #78be20; /* Verde Bootstrap */
+  color: white;
+}
+
+#toastAtualizacao .btn-close {
+  filter: brightness(0) invert(1); /* Deixa o "X" branco */
+}
+
+/* Botão secundário */
+.btn-portal-secondary {
+    background-color: #858796;
+    color: white;
+}
+
+.btn-portal-secondary:hover {
+    background-color: #717384;
+}
+
+.card-header-custom {
+    background-color: #035f1d;
+    color: white;
+    border-bottom: none;
+    padding: 1.5rem;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.card-header-custom {
+    position: relative; /* Container de referência */
+    min-height: 100px; /* Altura mínima para o cabeçalho */
+    padding-bottom: 40px; /* Espaço para a logo */
+    overflow: hidden; /* Esconde o que ultrapassar */
+}
+
+.logo-cortada {
+    position: absolute;
+    right: -5px; /* Distância da direita */
+    bottom: 0;
+    transform: translateY(50%); /* Mostra apenas a metade superior */
+    max-height: 210px; /* Altura máxima da logo */
+    width: auto;
+    object-fit: cover; /* Garante que a imagem não distorça */
+    object-position: top; /* Foca na parte superior da imagem */
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3)); /* Efeito visual opcional */
+}
+
+.Titulo {
+    padding-top: 15px;
+    font-size: 2.5rem;
+}
+
+#departamento.form-control {
+  margin-bottom: 1rem;
+}
+
+#data.form-control {
+  margin-bottom: 1rem;
+}
+.titulo-arquivos {
+    font-weight: bold;
+    padding-top: 15px;
+    padding-bottom: 10px;
+    font-size: 2.5rem;
+}
+
+.titulo-holerites {
+    font-weight: bold;
+    padding-top: 15px;
+    padding-bottom: 10px;
+    font-size: 2.5rem;
+}
+
+.card.shadow-sm {
+  opacity: 1;
+  transform: translateY(-30px);
+  transition: opacity 0.8s ease, transform 0.8s ease;
+}
+
+.card.shadow-sm.aparecer {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.icon-link {
+    margin-right: 30px; /* Aumente conforme necessário */
+    display: inline-block;
+}
+
+.navbar {
+    background-color: #4e4b48;
+}
+
+/* Impede o conteúdo de sair da largura do card no mobile */
+.accordion-body {
+  overflow-x: auto;
+}
+
+/* Faz os itens da lista quebrarem corretamente */
+.list-group-item {
+  flex-direction: column;
+  align-items: flex-start !important;
+  word-break: break-word;
+}
+
+/* Ajusta o botão “Ver” para alinhar corretamente em colunas no mobile */
+.list-group-item .btn-portal {
+  margin-top: 0.5rem;
+  width: 100%;
+  max-width: 200px;
+}
+
+.card.shadow-sm {
+  margin-top: 30px;
+}
+
+#notificacaoNovaRequisicao {
+  position: fixed;
+  top: 0;
+  right: 20px;
+  z-index: 1055;
+}
+.notificacao-item {
+  background-color: #ffc107;
+  color: #000;
+  padding: 10px 15px;
+  margin-bottom: 10px;
+  border-radius: 6px;
+  box-shadow: 0 0 10px rgba(0,0,0,0.15);
+  cursor: pointer;
+}
+
+  #tabela-veiculos td,
+  #tabela-veiculos th {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 180px;
+    vertical-align: middle;
+  }
+
+  #tabela-veiculos td:last-child {
+    white-space: normal; /* Deixa os botões com quebra se necessário */
+    max-width: none;
+  }
+  
+
+@media (max-width: 576px) {
+
+  body {
+    font-family: 'Josefin Sans', sans-serif;
+    background-color: #f8f9fa;
+  }
+
+  .login-card {
+    margin: 0 10px; /* Evita grudar nas bordas */
+  }
+
+  .card.shadow-sm {
+    margin: 0 10px; /* Evita grudar nas bordas */
+  }
+
+  .card-body {
+    padding: 1.5rem 1rem; /* Reduz um pouco o padding interno */
+  }
+
+  .logo {
+    max-width: 250px; /* Diminui a logo */
+    max-height: 100px;
+  }
+
+  .logo-cortada {
+    position: absolute;
+    right: -5px; /* Distância da direita */
+    bottom: 0;
+    transform: translateY(50%); /* Mostra apenas a metade superior */
+    max-width: 70px; /* Altura máxima da logo */
+    object-fit: cover; /* Garante que a imagem não distorça */
+    object-position: top; /* Foca na parte superior da imagem */
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3)); /* Efeito visual opcional */
+  }
+
+  .Titulo {
+    font-size: 1.5rem;
+  }
+
+  .form-label{
+    padding: 0.5rem;
+  }
+
+  .titulo-holerites {
+    font-size: 1.5rem;
+  }
+
+  h4 {
+    font-size: 1.1rem;
+  }
+
+  .btn-portal {
+    font-size: 1rem;
+    padding: 0.75rem;
+  }
+}

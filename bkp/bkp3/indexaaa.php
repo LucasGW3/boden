@@ -426,13 +426,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $desc_norm = $carg_norm = [];
     $p_tmd_hhmm = $p_tmc_hhmm = '';
     $p_tmd_min = $p_tmc_min = 0;
-    $p_meta_sacos_dia = 0;
-    $p_maquina_parada_hhmm = '';
-    $p_maquina_parada_min = 0;
 
     if ($can['producao']) {
       $allowed_desc = ['carreta_ls','truck'];
-      $allowed_carg = ['carreta_ls','truck','bitruck','sider','outros'];
+      $allowed_carg = ['carreta_ls','truck','bitruck','sider'];
 
       $descargas = json_decode($_POST['p_descargas'] ?? '[]', true) ?: [];
       $cargas    = json_decode($_POST['p_cargas']    ?? '[]', true) ?: [];
@@ -449,12 +446,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!in_array($tipo, $allowed_carg, true)) continue;
         $hhmm = preg_replace('/[^0-9:]/','', $r['hhmm'] ?? '');
         $min  = hhmm_to_minutes($hhmm) ?? null;
-        $pessoas = isset($r['pessoas']) && $r['pessoas'] !== '' ? max(0, (int)$r['pessoas']) : null;
-        $row = ['tipo'=>$tipo, 'hhmm'=>$hhmm, 'min'=>$min];
-        if ($pessoas !== null) {
-          $row['pessoas'] = $pessoas;
-        }
-        $carg_norm[] = $row;
+        $carg_norm[] = ['tipo'=>$tipo, 'hhmm'=>$hhmm, 'min'=>$min];
       }
       $prefDesc   = first_by_tipo($desc_norm, ['carreta_ls']);
       $prefCarg   = first_by_tipo($carg_norm, ['carreta_ls']);
@@ -462,16 +454,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       $p_tmd_min  = hhmm_to_minutes($p_tmd_hhmm) ?? 0;
       $p_tmc_hhmm = $prefCarg['hhmm'] ?? '';
       $p_tmc_min  = hhmm_to_minutes($p_tmc_hhmm) ?? 0;
-      $raw_maquina_parada = $_POST['p_maquina_parada'] ?? '';
-      $p_maquina_parada_hhmm = preg_replace('/[^0-9:]/', '', (string)$raw_maquina_parada);
-      $maquina_parada_min = hhmm_to_minutes($p_maquina_parada_hhmm);
-      if ($p_maquina_parada_hhmm === '' || $maquina_parada_min === null) {
-        $p_maquina_parada_hhmm = '';
-        $p_maquina_parada_min = 0;
-      } else {
-        $p_maquina_parada_min = $maquina_parada_min;
-      }
-      $p_meta_sacos_dia = (float)($_POST['p_meta_sacos_dia'] ?? 0);
     }
 
     // ====== Fazenda ======
@@ -525,17 +507,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
       foreach ($romaneio_rows as $r) {
         $var = trim($r['variedade'] ?? '');
         if ($var==='') continue;
-        if (!isset($agg[$var])) {
-          $agg[$var] = [
-            'cx1'=>0,'cx2'=>0,'cx3'=>0,'cx3G'=>0,'cx4'=>0,'cx5'=>0,'diversas'=>0,'residuo'=>0,'refugo'=>0
-          ];
-        }
-        foreach (['cx1','cx2','cx3','cx3G','cx4','cx5','diversas','residuo','refugo'] as $k) {
-          $agg[$var][$k] += (int)($r[$k] ?? 0);
-        }
+        if (!isset($agg[$var])) $agg[$var] = ['cx1'=>0,'cx2'=>0,'cx3'=>0,'cx4'=>0,'cx5'=>0,'residuo'=>0,'refugo'=>0];
+        foreach (['cx1','cx2','cx3','cx4','cx5','residuo','refugo'] as $k) $agg[$var][$k] += (int)($r[$k] ?? 0);
       }
       foreach ($agg as $var=>$v) {
-        $util = (int)$v['cx1'] + (int)$v['cx2'] + (int)$v['cx3'] + (int)$v['cx3G'] + (int)$v['cx4'] + (int)$v['cx5'] + (int)$v['diversas'];
+        $util = (int)$v['cx1'] + (int)$v['cx2'] + (int)$v['cx3'] + (int)$v['cx4'] + (int)$v['cx5'];
         $den  = $util + (int)$v['residuo'] + (int)$v['refugo'];
         $pct  = $den>0 ? ($util/$den*100.0) : null;
         if ($den>0) { $tot_uti += $util; $tot_all += $den; }
@@ -544,168 +520,124 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     $aprov_geral = $tot_all>0 ? round($tot_uti/$tot_all*100.0, 2) : null;
 
-    $delta = [
-  'meta' => [
-    'ref_date'    => $ref_date,
-    'responsavel' => $sessionResp,
-    'observacoes' => trim($_POST['observacoes'] ?? '') // se você usa observações gerais
-  ],
-];
+    $payload = [
+      'meta' => [
+        'ref_date'    => $ref_date,
+        'unidade'     => trim($_POST['unidade'] ?? ''), // (se precisar, troque o UPSERT para considerar unidade)
+        'responsavel' => $sessionResp,
+        'observacoes' => trim($_POST['observacoes'] ?? '')
+      ],
+      'comercial' => [
+        'vendas' => $can['comercial'] ? $c_vendas : [],
+        'observacoes' => $can['comercial'] ? $obs_comercial : '',
+      ],
+      'logistica' => $can['logistica'] ? [
+        // NOVO: lista de transportes do dia (multi-entradas)
+        'transporte_multi' => $log_norm,
+        // Legado preservado (primeiros registros por tipo, se existirem)
+        'transporte' => [
+          'carreta_ls' => [ 'hhmm'=>$tmt_ls_hhmm, 'min'=>$tmt_ls_min ],
+          'truck'      => [ 'hhmm'=>$tmt_truck_hhmm, 'min'=>$tmt_truck_min ],
+        ],
+        // Legado preservado (mantém principal como LS, se houver)
+        'tempo_transporte_hhmm' => $tmt_ls_hhmm,
+        'tempo_transporte_min'  => $tmt_ls_min,
+        // NOVO: observações por sessão
+        'observacoes' => $obs_logistica,
+      ] : [],
+      'qualidade' => $can['qualidade'] ? [
+        'pelada_pct' => [
+          'dia_anterior' => $q_pelada_dia,
+          'media_geral'  => $q_pelada_media
+        ],
+        'defeitos_pct' => [
+          'dia_anterior' => $q_defeitos_dia,
+          'media_geral'  => $q_defeitos_media
+        ],
+        'uniformidade_pct' => [
+          'dia_anterior' => $q_uniform_dia,
+          'media_geral'  => $q_uniform_media
+        ],
+        'pmb_variedade'         => $q_pmb_var,
+        'bulbos_saco_variedade' => $q_bulbos_var,
+        // NOVO: observações por sessão
+        'observacoes' => $obs_qualidade,
+      ] : [],
+      'producao' => $can['producao'] ? [
+        'descarregamento' => $desc_norm,
+        'carregamento'    => $carg_norm,
+        'tempo_descarregamento_hhmm' => $p_tmd_hhmm,
+        'tempo_descarregamento_min'  => $p_tmd_min,
+        'tempo_carregamento_hhmm'    => $p_tmc_hhmm,
+        'tempo_carregamento_min'     => $p_tmc_min,
+        'tmd' => [
+          'dia_anterior' => (float)$p_tmd_min,
+          'media_geral'  => (float)($_POST['p_tmd_media'] ?? 0)
+        ],
+        'tmc' => [
+          'dia_anterior' => (float)$p_tmc_min,
+          'media_geral'  => (float)($_POST['p_tmc_media'] ?? 0)
+        ],
+        'aproveitamento_var_pct' => [
+          'dia_anterior' => $aprov_geral !== null ? (float)$aprov_geral : 0.0,
+          'media_geral'  => (float)($_POST['p_aprov_media'] ?? ($aprov_geral ?? 0))
+        ],
+        'aproveitamento_var_por_variedade' => $aprov_por_var,
+        'romaneio' => $romaneio_rows,
+        'sacos_beneficiados_dia' => [
+          'dia_anterior'=>(float)($_POST['p_sacos_benef_dia'] ?? 0),
+          'media_geral' =>(float)($_POST['p_sacos_benef_media'] ?? 0)
+        ],
+        'sacos_por_colaborador' => [
+          'dia_anterior'=>(float)($_POST['p_sacos_colab_dia'] ?? 0),
+          'media_geral' =>(float)($_POST['p_sacos_colab_media'] ?? 0)
+        ],
+        // NOVO: observações por sessão
+        'observacoes' => $obs_producao,
+      ] : [],
+      'fazenda' => $can['fazenda'] ? [
+        'pessoas_dia' => [
+          'dia_anterior'=>(float)($_POST['f_pessoas_dia'] ?? 0),
+          'media_geral' =>(float)($_POST['f_pessoas_media'] ?? 0)
+        ],
+        'bigbag_por_variedade' => json_decode($_POST['f_bigbag_variedade'] ?? '[]', true) ?: [],
+        'colhedora_bigbag_dia' => [
+          'dia_anterior'=>(float)($_POST['f_colhedora_dia'] ?? 0),
+          'media_geral' =>(float)($_POST['f_colhedora_media'] ?? 0)
+        ],
+        'carregamento' => $faz_carg_norm,
+        'tmc_fazenda_hhmm' => $f_tmc_hhmm,
+        'tmc_fazenda_min'  => $f_tmc_min,
+        'tmc_fazenda' => [
+          'dia_anterior'=>(float)$f_tmc_min,
+          'media_geral' =>(float)($_POST['f_tmc_media'] ?? 0)
+        ],
+        // NOVO: observações por sessão
+        'observacoes' => $obs_fazenda,
+      ] : [],
+    ];
 
-// Inclua cada seção SOMENTE se o usuário puder editá-la
-if ($can['comercial']) {
-  $delta['comercial'] = [
-    'vendas'      => $c_vendas,
-    'observacoes' => $obs_comercial,
-  ];
-}
-if ($can['logistica']) {
-  $delta['logistica'] = [
-    'transporte_multi' => $log_norm,
-    'transporte' => [
-      'carreta_ls' => [ 'hhmm'=>$tmt_ls_hhmm, 'min'=>$tmt_ls_min ],
-      'truck'      => [ 'hhmm'=>$tmt_truck_hhmm, 'min'=>$tmt_truck_min ],
-    ],
-    'tempo_transporte_hhmm' => $tmt_ls_hhmm,
-    'tempo_transporte_min'  => $tmt_ls_min,
-    'observacoes'           => $obs_logistica,
-  ];
-}
-if ($can['qualidade']) {
-  $delta['qualidade'] = [
-    'pelada_pct' => [
-      'dia_anterior' => $q_pelada_dia,
-      'media_geral'  => $q_pelada_media
-    ],
-    'defeitos_pct' => [
-      'dia_anterior' => $q_defeitos_dia,
-      'media_geral'  => $q_defeitos_media
-    ],
-    'uniformidade_pct' => [
-      'dia_anterior' => $q_uniform_dia,
-      'media_geral'  => $q_uniform_media
-    ],
-    'pmb_variedade'         => $q_pmb_var,
-    'bulbos_saco_variedade' => $q_bulbos_var,
-    'observacoes'           => $obs_qualidade,
-  ];
-}
-if ($can['producao']) {
-  $delta['producao'] = [
-    'descarregamento' => $desc_norm,
-    'carregamento'    => $carg_norm,
-    'tempo_descarregamento_hhmm' => $p_tmd_hhmm,
-    'tempo_descarregamento_min'  => $p_tmd_min,
-    'tempo_carregamento_hhmm'    => $p_tmc_hhmm,
-    'tempo_carregamento_min'     => $p_tmc_min,
-    'maquina_parada_hhmm'        => $p_maquina_parada_hhmm,
-    'maquina_parada_min'         => (int)$p_maquina_parada_min,
-    'maquina_parada' => [
-      'hhmm' => $p_maquina_parada_hhmm,
-      'min'  => (int)$p_maquina_parada_min,
-    ],
-    'tmd' => [
-      'dia_anterior' => (float)$p_tmd_min,
-      'media_geral'  => (float)($_POST['p_tmd_media'] ?? 0)
-    ],
-    'tmc' => [
-      'dia_anterior' => (float)$p_tmc_min,
-      'media_geral'  => (float)($_POST['p_tmc_media'] ?? 0)
-    ],
-    'aproveitamento_var_pct' => [
-      'dia_anterior' => $aprov_geral !== null ? (float)$aprov_geral : 0.0,
-      'media_geral'  => (float)($_POST['p_aprov_media'] ?? ($aprov_geral ?? 0))
-    ],
-    'aproveitamento_var_por_variedade' => $aprov_por_var,
-    'romaneio' => $romaneio_rows,
-    'sacos_beneficiados_dia' => [
-      'dia_anterior'=>(float)($_POST['p_sacos_benef_dia'] ?? 0),
-      'media_geral' =>(float)($_POST['p_sacos_benef_media'] ?? 0)
-    ],
-    'meta_sacos_dia' => (float)$p_meta_sacos_dia,
-    'sacos_por_colaborador' => [
-      'dia_anterior'=>(float)($_POST['p_sacos_colab_dia'] ?? 0),
-      'media_geral' =>(float)($_POST['p_sacos_colab_media'] ?? 0)
-    ],
-    'observacoes' => $obs_producao,
-  ];
-}
-if ($can['fazenda']) {
-  $delta['fazenda'] = [
-    'pessoas_dia' => [
-      'dia_anterior'=>(float)($_POST['f_pessoas_dia'] ?? 0),
-      'media_geral' =>(float)($_POST['f_pessoas_media'] ?? 0)
-    ],
-    'bigbag_por_variedade' => json_decode($_POST['f_bigbag_variedade'] ?? '[]', true) ?: [],
-    'colhedora_bigbag_dia' => [
-      'dia_anterior'=>(float)($_POST['f_colhedora_dia'] ?? 0),
-      'media_geral' =>(float)($_POST['f_colhedora_media'] ?? 0)
-    ],
-    'carregamento'     => $faz_carg_norm,
-    'tmc_fazenda_hhmm' => $f_tmc_hhmm,
-    'tmc_fazenda_min'  => $f_tmc_min,
-    'tmc_fazenda' => [
-      'dia_anterior'=>(float)$f_tmc_min,
-      'media_geral' =>(float)($_POST['f_tmc_media'] ?? 0)
-    ],
-    'observacoes' => $obs_fazenda,
-  ];
-}
+    // [FIX] UPSERT por ref_date — substitui completamente o dia para refletir remoções
+    pdo()->beginTransaction();
+    try {
+      // Se você quiser por unidade no futuro, troque o DELETE abaixo por:
+      // DELETE FROM safra_entries WHERE ref_date = ? AND COALESCE(unidade,'') = COALESCE(?, '')
+      $del = pdo()->prepare('DELETE FROM safra_entries WHERE ref_date = ?');
+      $del->execute([$ref_date]);
 
-// --- versão com unidade na chave (garanta o hidden name="unidade" no <form>) ---
-pdo()->beginTransaction();
-try {
-  $sel = pdo()->prepare('
-    SELECT id, payload_json
-      FROM safra_entries
-    WHERE ref_date = ?
-    ORDER BY id DESC
-    LIMIT 1
-    FOR UPDATE
-  ');
-  $sel->execute([$ref_date]);
-  $row = $sel->fetch(PDO::FETCH_ASSOC);
+      $ins = pdo()->prepare('INSERT INTO safra_entries (ref_date, unidade, responsavel, payload_json) VALUES (?,?,?,?)');
+      $ins->execute([
+        $ref_date,
+        $payload['meta']['unidade'],
+        $payload['meta']['responsavel'],
+        json_encode($payload, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES)
+      ]);
 
-  $currentPayload = $row ? (json_decode($row['payload_json'], true) ?: []) : [];
-  $currentEtag = hash('sha256', json_encode($currentPayload, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES));
-  $sentIfMatch = $_POST['if_match'] ?? '';
-
-  if ($row) {
-    if (!$sentIfMatch || !hash_equals($sentIfMatch, $currentEtag)) {
+      pdo()->commit();
+    } catch (Throwable $txe) {
       pdo()->rollBack();
-      $_SESSION['last_error'] = 'O registro deste dia/unidade foi atualizado por outra pessoa. Recarregue a página.';
-      header('Location: '.$_SERVER['PHP_SELF'].'?error=1');
-      exit;
+      throw $txe;
     }
-  }
-
-  $merged = $currentPayload;
-  foreach (['meta','comercial','logistica','qualidade','producao','fazenda'] as $sec) {
-    if (array_key_exists($sec, $delta)) $merged[$sec] = $delta[$sec];
-  }
-
-  $json = json_encode($merged, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
-
-  if ($row) {
-    $upd = pdo()->prepare('
-      UPDATE safra_entries
-         SET payload_json = :json
-       WHERE id = :id
-    ');
-    $upd->execute([':json'=>$json, ':id'=>(int)$row['id']]);
-  } else {
-    $ins = pdo()->prepare('
-      INSERT INTO safra_entries (ref_date, payload_json, created_at)
-      VALUES (:ref_date, :json, NOW())
-    ');
-    $ins->execute([':ref_date'=>$ref_date, ':json'=>$json]);
-  }
-
-  pdo()->commit();
-} catch (Throwable $txe) {
-  pdo()->rollBack();
-  throw $txe;
-}
 
     $_SESSION['processed_uids'][$form_uid] = time();
     header('Location: '.$_SERVER['PHP_SELF'].'?saved=1&date='.rawurlencode($ref_date).'&view='.rawurlencode($ref_date));
@@ -732,9 +664,6 @@ try {
 } catch(Throwable $e) {
   $viewPayload = [];
 }
-
-// ETag do payload atual (para controle otimista)
-$etag = hash('sha256', json_encode($viewPayload ?? [], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES));
 
 // Flash via PRG
 $flash = ['type'=>null,'msg'=>null];
@@ -777,16 +706,6 @@ $prefill = [
   'p_cargas'    => dot($viewPayload,'producao.carregamento') ?: (function() use ($viewPayload){
       $hh = dot($viewPayload,'producao.tempo_carregamento_hhmm');
       return $hh ? [['tipo'=>'carreta_ls','hhmm'=>$hh,'min'=>hhmm_to_minutes($hh)]] : [];
-  })(),
-  'p_maquina_parada' => (function() use ($viewPayload){
-      $hh = dot($viewPayload,'producao.maquina_parada_hhmm')
-          ?: dot($viewPayload,'producao.maquina_parada.hhmm');
-      if ($hh) return $hh;
-      $min = dot($viewPayload,'producao.maquina_parada_min');
-      if ($min !== null && $min !== '') return minutes_to_hhmm($min);
-      $min = dot($viewPayload,'producao.maquina_parada.min');
-      if ($min !== null && $min !== '') return minutes_to_hhmm($min);
-      return '';
   })(),
 
   // Fazenda — repetidor (novo) com fallback ao legado
@@ -868,7 +787,17 @@ foreach ($tabOrder as $t) { if (!empty($can[$t])) { $defaultTab = $t; break; } }
   <title>Boden - Safra Cebola 25/26</title>
   <link href="https://fonts.googleapis.com/css2?family=Cabin:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
   <link rel="icon" type="image/png" sizes="96x96" href="./favicon-96x96.png">
-  <link rel="stylesheet" href="./dist/styles.css">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: { extend: {
+        fontFamily: { sans: ['Nunito','ui-sans-serif','system-ui'] },
+        colors: { brand: { bg:'#F9FAFB', surface:'#FFFFFF', line:'#E0E7E0', primary:'#5FB141', primaryDark:'#3C8F28', text:'#273418', muted:'#6B7280' } },
+        borderRadius: { lg:'0.75rem', xl:'1rem', '2xl':'1.5rem' },
+        boxShadow: { 'soft-green':'0 10px 25px -5px rgba(95,177,65,.08), 0 4px 8px -1 rgba(95,177,65,.1)' }
+      } }
+    }
+  </script>
   <style>
     body { background-color:#F9FAFB; -webkit-font-smoothing:antialiased; -moz-osx-font-smoothing:grayscale; }
     input[type="number"]{ text-align:right; }
@@ -879,7 +808,7 @@ foreach ($tabOrder as $t) { if (!empty($can[$t])) { $defaultTab = $t; break; } }
   </style>
   <?php render_datepicker_assets(); ?>
 </head>
-<body class="text-brand-text">
+<body class="text-brand-text bg-brand-bg">
   <!-- Nav -->
  <?php render_boden_navbar('form'); ?>
   <div class="max-w-7xl mx-auto p-6 lg:p-10">
@@ -922,7 +851,6 @@ foreach ($tabOrder as $t) { if (!empty($can[$t])) { $defaultTab = $t; break; } }
       <input type="hidden" name="form_uid" value="<?php echo htmlspecialchars($form_uid); ?>" />
       <!-- [NOVO] ref_date vem do filtro de data (view) -->
       <input type="hidden" name="ref_date" id="ref_date_hidden" value="<?php echo htmlspecialchars($view); ?>" />
-      <input type="hidden" name="if_match" value="<?php echo htmlspecialchars($etag); ?>" />
 
       <!-- Meta -->
       <section class="bg-brand-surface border border-brand-line rounded-2xl p-6 lg:p-8">
@@ -959,7 +887,6 @@ foreach ($tabOrder as $t) { if (!empty($can[$t])) { $defaultTab = $t; break; } }
               $rowsC_disp[] = [
                 'caixa'        => $r['caixa'] ?? '',
                 'variedade'    => $r['variedade'] ?? '',
-                'qntd_venda_kg'=> $r['qntd_venda_kg'] ?? ($r['qntd_venda'] ?? ($r['qntd'] ?? '')),
                 'preco_ontem'  => $r['preco_ontem'] ?? ($r['preco'] ?? ''),
                 'preco_hoje'   => $r['preco_hoje']  ?? '',
               ];
@@ -975,7 +902,7 @@ foreach ($tabOrder as $t) { if (!empty($can[$t])) { $defaultTab = $t; break; } }
               </span>
             </label>
           </div>
-         <?php echo render_rows_compact($rowsC_disp,[ 'caixa'=>'Caixa','variedade'=>'Variedade','qntd_venda_kg'=>'Qntd. Venda/Kg','preco_ontem'=>'Preço Ontem (R$)','preco_hoje'=>'Preço Hoje (R$)' ]); ?>
+          <?php echo render_rows_compact($rowsC_disp,[ 'caixa'=>'Caixa','variedade'=>'Variedade','preco_ontem'=>'Preço Ontem (R$)','preco_hoje'=>'Preço Hoje (R$)' ]); ?>
           <div id="cVendas" class="space-y-3 mt-3"></div>
           <input type="hidden" name="c_vendas" id="c_vendas_json" />
 
@@ -1126,42 +1053,10 @@ foreach ($tabOrder as $t) { if (!empty($can[$t])) { $defaultTab = $t; break; } }
                 <button type="button" class="btn-add-carg px-3 py-1.5 text-xs rounded-full border border-brand-line bg-white hover:bg-brand-bg" data-tipo="truck">Truck</button>
                 <button type="button" class="btn-add-carg px-3 py-1.5 text-xs rounded-full border border-brand-line bg-white hover:bg-brand-bg" data-tipo="bitruck">Bitruck</button>
                 <button type="button" class="btn-add-carg px-3 py-1.5 text-xs rounded-full border border-brand-line bg-white hover:bg-brand-bg" data-tipo="sider">Sider</button>
-                <button type="button" class="btn-add-carg px-3 py-1.5 text-xs rounded-full border border-brand-line bg-white hover:bg-brand-bg" data-tipo="outros">Outros</button>
               </div>
             </div>
             <div id="pCargas" class="space-y-3"></div>
             <input type="hidden" name="p_cargas" id="p_cargas_json" />
-          </div>
-
-                    <!-- Máquina parada -->
-          <div class="grid md:grid-cols-3 gap-6">
-            <div>
-              <?php
-                $vMaqParada = dot($viewPayload,'producao.maquina_parada_hhmm');
-                if (!$vMaqParada) {
-                  $vMaqParada = dot($viewPayload,'producao.maquina_parada.hhmm');
-                }
-                if (!$vMaqParada) {
-                  $vMaqParadaMin = dot($viewPayload,'producao.maquina_parada_min');
-                  if ($vMaqParadaMin !== null && $vMaqParadaMin !== '') {
-                    $vMaqParada = minutes_to_hhmm($vMaqParadaMin);
-                  } else {
-                    $vMaqParadaMin = dot($viewPayload,'producao.maquina_parada.min');
-                    if ($vMaqParadaMin !== null && $vMaqParadaMin !== '') {
-                      $vMaqParada = minutes_to_hhmm($vMaqParadaMin);
-                    }
-                  }
-                }
-                $okMaqParada = has_value($vMaqParada);
-              ?>
-              <label class="block text-sm font-medium text-brand-muted mb-2 flex items-center gap-2">
-                Máquina parada (HH:MM)
-                <?php echo badge($okMaqParada).chip_value($vMaqParada,'num'); ?>
-              </label>
-              <input type="time" step="60" name="p_maquina_parada"
-                     value="<?php echo htmlspecialchars($prefill['p_maquina_parada']); ?>"
-                     class="block w-full h-11 px-4 py-2 bg-white border border-brand-line rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary/30 focus:border-brand-primary" />
-            </div>
           </div>
 
           <!-- Aproveitamento geral (auto) -->
@@ -1176,8 +1071,8 @@ foreach ($tabOrder as $t) { if (!empty($can[$t])) { $defaultTab = $t; break; } }
             </div>
           </div>
 
-          <!-- Colaboradores/Dia, Sacos Beneficiados/Dia e Meta de Sacos (Dia) -->
-          <div class="grid md:grid-cols-3 gap-6">
+          <!-- NOVO: Colaboradores/Dia e Sacos Beneficiados/Dia -->
+          <div class="grid md:grid-cols-2 gap-6">
             <div>
               <?php $vColabDia = dot($viewPayload,'producao.sacos_por_colaborador.dia_anterior'); $okColabDia = has_value($vColabDia); ?>
               <label class="block text-sm font-medium text-brand-muted mb-2 flex items-center gap-2">
@@ -1185,10 +1080,9 @@ foreach ($tabOrder as $t) { if (!empty($can[$t])) { $defaultTab = $t; break; } }
                 <?php echo badge($okColabDia).chip_value($vColabDia,'num'); ?>
               </label>
               <input type="number" min="0" step="1" name="p_sacos_colab_dia"
-                    value="<?php echo htmlspecialchars(num_input($vColabDia)); ?>"
-                    class="block w-full h-11 px-4 py-2 bg-white border border-brand-line rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary/30 focus:border-brand-primary" />
+                     value="<?php echo htmlspecialchars(num_input($vColabDia)); ?>"
+                     class="block w-full h-11 px-4 py-2 bg-white border border-brand-line rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary/30 focus:border-brand-primary" />
             </div>
-
             <div>
               <?php $vSacosDia = dot($viewPayload,'producao.sacos_beneficiados_dia.dia_anterior'); $okSacosDia = has_value($vSacosDia); ?>
               <label class="block text-sm font-medium text-brand-muted mb-2 flex items-center gap-2">
@@ -1196,20 +1090,8 @@ foreach ($tabOrder as $t) { if (!empty($can[$t])) { $defaultTab = $t; break; } }
                 <?php echo badge($okSacosDia).chip_value($vSacosDia,'num'); ?>
               </label>
               <input type="number" min="0" step="1" name="p_sacos_benef_dia"
-                    value="<?php echo htmlspecialchars(num_input($vSacosDia)); ?>"
-                    class="block w-full h-11 px-4 py-2 bg-white border border-brand-line rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary/30 focus:border-brand-primary" />
-            </div>
-
-            <!-- NOVO: Meta de sacos (dia) -->
-            <div>
-              <?php $vMetaSacos = dot($viewPayload,'producao.meta_sacos_dia'); $okMeta = has_value($vMetaSacos); ?>
-              <label class="block text-sm font-medium text-brand-muted mb-2 flex items-center gap-2">
-                Meta de Sacos (Dia)
-                <?php echo badge($okMeta).chip_value($vMetaSacos,'num'); ?>
-              </label>
-              <input type="number" min="0" step="1" name="p_meta_sacos_dia"
-                    value="<?php echo htmlspecialchars(num_input($vMetaSacos)); ?>"
-                    class="block w-full h-11 px-4 py-2 bg-white border border-brand-line rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary/30 focus:border-brand-primary" />
+                     value="<?php echo htmlspecialchars(num_input($vSacosDia)); ?>"
+                     class="block w-full h-11 px-4 py-2 bg-white border border-brand-line rounded-lg focus:outline-none focus:ring-2 focus:ring-brand-primary/30 focus:border-brand-primary" />
             </div>
           </div>
 
@@ -1239,7 +1121,7 @@ foreach ($tabOrder as $t) { if (!empty($can[$t])) { $defaultTab = $t; break; } }
                 </span>
               </label>
             </div>
-             <?php echo render_rows_compact($rowsP14,[ 'variedade'=>'Variedade','cx1'=>'Cx1','cx2'=>'Cx2','cx3'=>'Cx3','cx3G'=>'Cx 3G','cx4'=>'Cx4','cx5'=>'Cx5','diversas'=>'Diversas','residuo'=>'Resíduo','refugo'=>'Refugo' ]); ?>
+            <?php echo render_rows_compact($rowsP14,[ 'variedade'=>'Variedade','cx1'=>'Cx1','cx2'=>'Cx2','cx3'=>'Cx3','cx4'=>'Cx4','cx5'=>'Cx5','residuo'=>'Resíduo','refugo'=>'Refugo' ]); ?>
             <div id="pRomaneio" class="space-y-3 mt-3"></div>
             <input type="hidden" name="p_romaneio" id="p_romaneio_json" />
           </div>
@@ -1454,16 +1336,10 @@ document.addEventListener('DOMContentLoaded', () => {
     return { add, snap:snapshot, clear, setRows };
   }
 
-  const CAIXAS     = ['Caixa 1','Caixa 2','Caixa 3','Caixa 3G','Caixa 4','Caixa 5'];
+  const CAIXAS     = ['Caixa 1','Caixa 2','Caixa 3','Caixa 4','Caixa 5'];
   const VARIEDADES = ['Mirela','Madalin','Topazio','Robusta','Karaja','Vale Sul','Lucinda','Irati','Salto Grande'];
   const TIPOS_DESC = [{value:'carreta_ls',label:'Carreta LS'},{value:'truck',label:'Truck'}];
-    const TIPOS_CARG = [
-    {value:'carreta_ls',label:'Carreta LS'},
-    {value:'truck',label:'Truck'},
-    {value:'bitruck',label:'Bitruck'},
-    {value:'sider',label:'Sider'},
-    {value:'outros',label:'Outros'}
-  ];
+  const TIPOS_CARG = [{value:'carreta_ls',label:'Carreta LS'},{value:'truck',label:'Truck'},{value:'bitruck',label:'Bitruck'},{value:'sider',label:'Sider'}];
   const TIPOS_FAZ_CARG = [{value:'carreta_ls',label:'Carreta LS'},{value:'truck',label:'Truck'}];
   const TIPOS_LOG = TIPOS_DESC;
 
@@ -1477,7 +1353,6 @@ document.addEventListener('DOMContentLoaded', () => {
     cVendas: bindRepeater('cVendas','c_vendas_json',[
       { name:'caixa',        label:'Caixa',             type:'select', options: CAIXAS },
       { name:'variedade',    label:'Variedade',         type:'select', options: VARIEDADES },
-      { name:'qntd_venda_kg',label:'Qntd. Venda/Kg',    type:'number', attrs:{ step:'0.01', min:'0', inputmode:'decimal' } },
       { name:'preco_ontem',  label:'Preço Ontem (R$)',  type:'number', attrs:{ step:'0.01', min:'0', inputmode:'decimal' } },
       { name:'preco_hoje',   label:'Preço Hoje (R$)',   type:'number', attrs:{ step:'0.01', min:'0', inputmode:'decimal' } },
     ]),
@@ -1498,10 +1373,8 @@ document.addEventListener('DOMContentLoaded', () => {
       { name:'cx1', label:'Cx 1', type:'number', attrs:{ step:'1', min:'0' } },
       { name:'cx2', label:'Cx 2', type:'number', attrs:{ step:'1', min:'0' } },
       { name:'cx3', label:'Cx 3', type:'number', attrs:{ step:'1', min:'0' } },
-      { name:'cx3G', label:'Cx 3G', type:'number', attrs:{ step:'1', min:'0' } },
       { name:'cx4', label:'Cx 4', type:'number', attrs:{ step:'1', min:'0' } },
       { name:'cx5', label:'Cx 5', type:'number', attrs:{ step:'1', min:'0' } },
-      { name:'diversas', label:'Diversas', type:'number', attrs:{ step:'1', min:'0' } },
       { name:'residuo', label:'Resíduo', type:'number', attrs:{ step:'1', min:'0' } },
       { name:'refugo',  label:'Refugo',  type:'number', attrs:{ step:'1', min:'0' } },
     ]),
@@ -1512,7 +1385,6 @@ document.addEventListener('DOMContentLoaded', () => {
     pCargas: bindRepeater('pCargas','p_cargas_json',[
       { name:'tipo', label:'Tipo', type:'select', options: TIPOS_CARG },
       { name:'hhmm', label:'Tempo (HH:MM)', type:'time', attrs:{ step:'60' } },
-      { name:'pessoas', label:'Pessoas Carregamento', type:'number', attrs:{ step:'1', min:'0' } },
     ]),
     fCarregamentos: bindRepeater('fCarregamentos','f_carregamentos_json',[
       { name:'tipo', label:'Tipo', type:'select', options: TIPOS_FAZ_CARG },
@@ -1536,7 +1408,7 @@ document.addEventListener('DOMContentLoaded', () => {
     btn.addEventListener('click', ()=>{ repeaters.pDescargas.add({ tipo: btn.dataset.tipo, hhmm:'' }); });
   });
   document.querySelectorAll('.btn-add-carg').forEach(btn=>{
-    btn.addEventListener('click', ()=>{ repeaters.pCargas.add({ tipo: btn.dataset.tipo, hhmm:'', pessoas:'' }); });
+    btn.addEventListener('click', ()=>{ repeaters.pCargas.add({ tipo: btn.dataset.tipo, hhmm:'' }); });
   });
   document.querySelectorAll('.btn-add-fcarg').forEach(btn=>{
     btn.addEventListener('click', ()=>{ repeaters.fCarregamentos.add({ tipo: btn.dataset.tipo, hhmm:'' }); });
@@ -1561,13 +1433,13 @@ document.addEventListener('DOMContentLoaded', () => {
     for (const r of rows){
       const v = (r.variedade||'').trim();
       if (!v) continue;
-      if (!agg[v]) agg[v] = {cx1:0,cx2:0,cx3:0,cx3G:0,cx4:0,cx5:0,diversas:0,residuo:0,refugo:0};
-      ['cx1','cx2','cx3','cx3G','cx4','cx5','diversas','residuo','refugo'].forEach(k=> agg[v][k]+= toNum(r[k]));
+      if (!agg[v]) agg[v] = {cx1:0,cx2:0,cx3:0,cx4:0,cx5:0,residuo:0,refugo:0};
+      ['cx1','cx2','cx3','cx4','cx5','residuo','refugo'].forEach(k=> agg[v][k]+= toNum(r[k]));
     }
     const aprovRows = [];
     let totUti=0, totAll=0;
     Object.entries(agg).forEach(([variedade,val])=>{
-      const util = val.cx1+val.cx2+val.cx3+val.cx3G+val.cx4+val.cx5+val.diversas;
+      const util = val.cx1+val.cx2+val.cx3+val.cx4+val.cx5;
       const den  = util + val.residuo + val.refugo;
       const pct  = den>0 ? (util/den*100) : null;
       if (den>0){ totUti+=util; totAll+=den; }
