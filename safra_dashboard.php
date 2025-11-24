@@ -3660,11 +3660,13 @@ Chart.register(noDataPlugin);
           ...hoursOpts.scales,
           x:{
             ...(hoursOpts.scales?.x || {}),
+            type:'category',
             ticks:{
               ...(hoursOpts.scales?.x?.ticks || {}),
               autoSkip:false,
               maxRotation:0,
-              minRotation:0
+              minRotation:0,
+              callback:(value, idx)=> (lblDesc?.[idx] ?? value)
             }
           }
         }
