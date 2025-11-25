@@ -2508,6 +2508,23 @@ function buildTypeDatasets(types, dictMinSeries, keepIdx, labelsFiltered, colorF
 
   return { datasets: ds, meanMap };
 }
+
+function projectTypeSeriesByDate(dictSeries, baseLabelsISO, targetLabelsISO){
+  const idxByDate = new Map();
+  (baseLabelsISO || []).forEach((d, idx) => {
+    if (!idxByDate.has(d)) idxByDate.set(d, idx);
+  });
+
+  const projected = {};
+  Object.entries(dictSeries || {}).forEach(([type, series]) => {
+    projected[type] = (targetLabelsISO || []).map((d) => {
+      const idx = idxByDate.get(d);
+      return idx == null ? null : (series?.[idx] ?? null);
+    });
+  });
+
+  return projected;
+}
   // ======== Helpers Comercial por caixa =========
   function combineBoxSeries(seriesMap, countMap, selectedBoxes, len){
     const boxes = (selectedBoxes && selectedBoxes.length)
@@ -2717,6 +2734,7 @@ function updateProdRomaneioChart(){
     const LCH = sliceByIdx(BASE.labelsC_H, keepH);
     const LCO = sliceByIdx(BASE.labelsC_O, keepO);
     const LDesc = hasProdDescLabels ? sliceByIdx(BASE.labelsProdDesc, keepDesc) : L;
+    const LDescISO = hasProdDescLabels ? sliceByIdx(BASE.labelsProdDescISO, keepDesc) : sliceByIdx(BASE.labelsISO, keep);
 
     const Sfil = {};
     for (const k of Object.keys(BASE.S)) Sfil[k] = sliceByIdx(BASE.S[k], keep);
@@ -2935,12 +2953,13 @@ if (can) {
 
     // Produção Carregamento — HORAS
     if (CH.prodCarreg){
-      CH.prodCarreg.data.labels = L;
+      CH.prodCarreg.data.labels = LDesc;
+      const prodCarrByDate = projectTypeSeriesByDate(BASE.prodCarrTipos || {}, BASE.labelsISO || [], LDescISO);
       const { datasets, meanMap } = buildTypeDatasets(
         BASE.typesProd || [],
-        BASE.prodCarrTipos || {},
-        keep,
-        L,
+        prodCarrByDate,
+        null,
+        LDesc,
         (t) => colorForType(t, false, false),
         {},
         'Média',
@@ -3629,12 +3648,15 @@ Chart.register(noDataPlugin);
   (function(){
     const el = document.getElementById('chartProdCarreg');
     if (!el) return;
-    CH.prodCarreg = new Chart(el, { data:{ labels, datasets:[] }, options:{ ...hoursOpts, plugins:{ ...hoursOpts.plugins, legend:{ position:'bottom', labels:{ boxWidth:12 } } } } });
+    const lblCarr = (labelsProdDesc && labelsProdDesc.length) ? labelsProdDesc : labels;
+    const lblCarrISO = (labelsProdDescISO && labelsProdDescISO.length) ? labelsProdDescISO : labelsISO;
+    CH.prodCarreg = new Chart(el, { data:{ labels: lblCarr, datasets:[] }, options:{ ...hoursOpts, plugins:{ ...hoursOpts.plugins, legend:{ position:'bottom', labels:{ boxWidth:12 } } } } });
+    const prodCarrByDate = projectTypeSeriesByDate(BASE.prodCarrTipos || {}, BASE.labelsISO || [], lblCarrISO);
     const { datasets, meanMap } = buildTypeDatasets(
       BASE.typesProd || [],
-      BASE.prodCarrTipos || {},
+      prodCarrByDate,
       null,
-      labels,
+      lblCarr,
       (t) => colorForType(t, false, false),
       {},
       'Média',
