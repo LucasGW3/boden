@@ -2576,6 +2576,17 @@ function weightedMean(series, weights){
   }
   return (wq>0) ? (ws / wq) : null;
 }
+function buildDailyMeanLine(seriesMap, countMap, selectedBoxes, len, keepIdx){
+  const idx = (keepIdx && keepIdx.length) ? keepIdx : Array.from({ length: len }, (_, i) => i);
+  const { series, weights } = combineBoxSeries(seriesMap, countMap, selectedBoxes, len);
+  const perDay = sliceByIdx(series, idx);
+  const perDayWeights = sliceByIdx(weights, idx);
+  return {
+    perDay,
+    weights: perDayWeights,
+    periodMean: weightedMean(perDay, perDayWeights),
+  };
+}
 function aggregateVarietySeries(periodKey, selectedVarieties){
   const allVarieties = BASE.comVarietyNames || [];
   const baseSeries = (periodKey === 'H') ? BASE.comHojeBoxSeries : BASE.comOntemBoxSeries;
@@ -2880,19 +2891,14 @@ if (can) {
         dataset.borderColor = colorForCaixa(box);
       }
 
-      const { series: combinedFull, weights: weightsFull } = combineBoxSeries(BASE.comHojeBoxSeries, BASE.comHojeBoxCount, sel, BASE.labelsC_H.length);
-      const combined = sliceByIdx(combinedFull, keepH);
-      const qty      = sliceByIdx(weightsFull,  keepH);
-
-      const hasW  = sumNumbers(qty) > 0;
-      const medW  = hasW ? weightedMean(combined, qty) : null;
+      const meanLine = buildDailyMeanLine(BASE.comHojeBoxSeries, BASE.comHojeBoxCount, sel, BASE.labelsC_H.length, keepH);
 
       const meanDataset = CH.comercial.data.datasets[boxNames.length];
-      meanDataset.data = combined;
+      meanDataset.data = meanLine.perDay;
       meanDataset.hidden = false;
 
       CH.comercial.update();
-      setMetaMoney(document.getElementById('com-meta'), medW);
+      setMetaMoney(document.getElementById('com-meta'), meanLine.periodMean);
     }
 
     // === Comercial ONTEM (linhas por caixa) ===
@@ -2915,18 +2921,13 @@ if (can) {
         dataset.borderColor = colorForCaixa(box);
       }
 
-      const { series: combinedFull, weights: weightsFull } = combineBoxSeries(BASE.comOntemBoxSeries, BASE.comOntemBoxCount, sel, BASE.labelsC_O.length);
-      const combined = sliceByIdx(combinedFull, keepO);
-      const qty      = sliceByIdx(weightsFull,  keepO);
-
-      const hasW  = sumNumbers(qty) > 0;
-      const medW  = hasW ? weightedMean(combined, qty) : null;
+      const meanLine = buildDailyMeanLine(BASE.comOntemBoxSeries, BASE.comOntemBoxCount, sel, BASE.labelsC_O.length, keepO);
 
       const meanDataset = CH.comercialOntem.data.datasets[boxNames.length];
-      meanDataset.data = combined;
+      meanDataset.data = meanLine.perDay;
       meanDataset.hidden = false;
       CH.comercialOntem.update();
-      setMetaMoney(document.getElementById('com-ontem-meta'), medW);
+      setMetaMoney(document.getElementById('com-ontem-meta'), meanLine.periodMean);
     }
 
     // ===== Logística (por veículo + médias individuais) – HORAS
@@ -3302,7 +3303,7 @@ Chart.register(noDataPlugin);
   const datasets = boxNames.map(box => (
     { ...mkLine(box, new Array(BASE.labelsC_H.length).fill(null), colorForCaixa(box), 'y', { borderWidth:3 }) }
   ));
-  datasets.push(mkLine('Média selecionada (R$/SC)', new Array(BASE.labelsC_H.length).fill(null), THEME.g3, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }));
+  datasets.push(mkLine('Média selecionada (R$/SC)', new Array(BASE.labelsC_H.length).fill(null), THEME.g3, 'y', { pointRadius:3, pointHoverRadius:5, pointRadiusLast:5, pointHoverRadiusLast:7, borderDash:[6,4], borderWidth:3 }));
 
   CH.comercial = new Chart(el, {
     data: { labels: BASE.labelsC_H, datasets },
@@ -3346,20 +3347,15 @@ Chart.register(noDataPlugin);
       dataset.borderColor = colorForCaixa(box);
     }
 
-    const { series: combinedFull, weights: weightsFull } = combineBoxSeries(seriesMap, countMap, selected, BASE.labelsC_H.length);
-    const combined = sliceByIdx(combinedFull, idx);
-    const weights  = sliceByIdx(weightsFull,  idx);
-
-    const hasW = sumNumbers(weights) > 0;
-    const medW = hasW ? weightedMean(combined, weights) : null;
+    const meanLine = buildDailyMeanLine(seriesMap, countMap, selected, BASE.labelsC_H.length, idx);
 
     const meanDataset = CH.comercial.data.datasets[boxNames.length];
-    meanDataset.data = combined;
+    meanDataset.data = meanLine.perDay;
     meanDataset.hidden = false;
 
     CH.comercial.update();
-    setMetaMoney(document.getElementById('com-meta'), medW);
-    };
+    setMetaMoney(document.getElementById('com-meta'), meanLine.periodMean);
+  };
 
   const allVariedadesH = BASE.comVarietyNames || [];
   window._comercialVarSelH = [...allVariedadesH];
@@ -3386,7 +3382,7 @@ Chart.register(noDataPlugin);
   const datasets = boxNames.map(box => (
     { ...mkLine(box, new Array(BASE.labelsC_O.length).fill(null), colorForCaixa(box), 'y', { borderWidth:3 }) }
   ));
-  datasets.push(mkLine('Média selecionada (R$/SC)', new Array(BASE.labelsC_O.length).fill(null), THEME.g3, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }));
+  datasets.push(mkLine('Média selecionada (R$/SC)', new Array(BASE.labelsC_O.length).fill(null), THEME.g3, 'y', { pointRadius:3, pointHoverRadius:5, pointRadiusLast:5, pointHoverRadiusLast:7, borderDash:[6,4], borderWidth:3 }));
 
   CH.comercialOntem = new Chart(el, {
     data: { labels: BASE.labelsC_O, datasets },
@@ -3430,19 +3426,14 @@ Chart.register(noDataPlugin);
       dataset.borderColor = colorForCaixa(box);
     }
 
-    const { series: combinedFull, weights: weightsFull } = combineBoxSeries(seriesMap, countMap, selected, BASE.labelsC_O.length);
-    const combined = sliceByIdx(combinedFull, idx);
-    const weights  = sliceByIdx(weightsFull,  idx);
-
-    const hasW = sumNumbers(weights) > 0;
-    const medW = hasW ? weightedMean(combined, weights) : null;
+    const meanLine = buildDailyMeanLine(seriesMap, countMap, selected, BASE.labelsC_O.length, idx);
 
     const meanDataset = CH.comercialOntem.data.datasets[boxNames.length];
-    meanDataset.data = combined;
+    meanDataset.data = meanLine.perDay;
     meanDataset.hidden = false;
 
     CH.comercialOntem.update();
-    setMetaMoney(document.getElementById('com-ontem-meta'), medW);
+    setMetaMoney(document.getElementById('com-ontem-meta'), meanLine.periodMean);
       };
 
   const allVariedadesO = BASE.comVarietyNames || [];
