@@ -787,16 +787,16 @@ sort($allVarList, SORT_NATURAL | SORT_FLAG_CASE);
   // ===== PONTO DE EQUILÍBRIO (por variedade) =====
   const DEFAULT_PE = { colheita: 0.80, beneficiado: 1.65 };
   const PE_POR_VAR = {
-    'Mirela':        { beneficiado: 1.31 },
-    'Madalin':       { beneficiado: 1.33 },
-    'Irati':         { beneficiado: 1.32 },
-    'Topazio':       { beneficiado: 1.82 },
-    'Lucinda':       { beneficiado: 2.79 },
-    'Karaja':        { beneficiado: 1.34 },
-    'Robusta':       { beneficiado: 1.46 },
-    'Vale Sul':      { beneficiado: 1.46 },
-    'Omega':         { beneficiado: 1.44 },
-    'Salto Grande':  { beneficiado: 1.39 },
+    'Mirela':        { colheita: 0.98, beneficiado: 1.40 },
+    'Madalin':       { colheita: 1.00, beneficiado: 1.42 },
+    'Irati':         { colheita: 0.99, beneficiado: 1.41 },
+    'Topazio':       { colheita: 1.80, beneficiado: 1.85 },
+    'Lucinda':       { colheita: 2.70, beneficiado: 2.75 },
+    'Karaja':        { colheita: 1.01, beneficiado: 1.43 },
+    'Robusta':       { colheita: 1.14, beneficiado: 1.55 },
+    'Vale Sul':      { colheita: 1.14, beneficiado: 1.55 },
+    'Omega':         { colheita: 1.12, beneficiado: 1.54 },
+    'Salto Grande':  { colheita: 1.07, beneficiado: 1.49 },
   };
 
   const peForVar = (varName) => {
