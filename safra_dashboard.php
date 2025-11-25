@@ -481,6 +481,7 @@ foreach ($rows as $r) {
   $d = $r['ref_date'];
   $descDay = $r['created_day'] ?? $d;
   if (!is_string($descDay) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $descDay)) $descDay = $d;
+  $carrDay = $descDay; // usar data de criação/lançamento para carregamento também
   if (!isset($byDay[$d])) $byDay[$d] = ['override'=>[], 'sum'=>[], 'avg'=>[]];
 
   $payload = json_decode($r['payload_json'] ?? 'null', true) ?: [];
@@ -541,9 +542,9 @@ foreach ($rows as $r) {
       $min  = any_to_min($it['min'] ?? $it['tmc_min'] ?? $it['hhmm'] ?? $it['tmc_hhmm'] ?? null);
       if ($min===null || $min<=0) continue;
       $allTypesProd[$tipo] = true;
-      if (!isset($prodCarrByType[$d][$tipo])) $prodCarrByType[$d][$tipo] = ['sum'=>0.0,'cnt'=>0];
-      $prodCarrByType[$d][$tipo]['sum'] += (float)$min;
-      $prodCarrByType[$d][$tipo]['cnt'] += 1;
+      if (!isset($prodCarrByType[$carrDay][$tipo])) $prodCarrByType[$carrDay][$tipo] = ['sum'=>0.0,'cnt'=>0];
+      $prodCarrByType[$carrDay][$tipo]['sum'] += (float)$min;
+      $prodCarrByType[$carrDay][$tipo]['cnt'] += 1;
     }
   }
 
@@ -632,6 +633,8 @@ foreach ($rows as $r) {
 }
 
 ksort($byDay);
+ksort($prodCarrByType);
+ksort($prodDescByType);
 $labelsISO  = array_keys($byDay);
 $labels     = [];
 $allMetrics = array_merge($metricsAvg, $metricsSum, $metricsOverride);
@@ -650,7 +653,11 @@ foreach ($byDay as $d => $bucket) {
     $series[$m][] = isset($bucket['override'][$m]) ? round((float)$bucket['override'][$m], 3) : null;
   }
 }
-ksort($prodDescByType);
+$labelsProdCarrISO = array_keys($prodCarrByType);
+$labelsProdCarr    = [];
+foreach ($labelsProdCarrISO as $dCarr) {
+  $labelsProdCarr[] = (new DateTime($dCarr))->format('d/m');
+}
 $labelsProdDescISO = array_keys($prodDescByType);
 $labelsProdDesc    = [];
 foreach ($labelsProdDescISO as $dDesc) {
@@ -1244,10 +1251,10 @@ $totalCarrSum = 0.0; $totalCarrCnt = 0;
 $totalDescSum = 0.0; $totalDescCnt = 0;
 $totalLogSum  = 0.0; $totalLogCnt  = 0;
 
-foreach (array_keys($byDay) as $d) {
+foreach ($labelsProdCarrISO as $dCarr) {
   $dailyCarrSum = 0.0; $dailyCarrCnt = 0;
   foreach ($typesProd as $t) {
-    $entry = $prodCarrByType[$d][$t] ?? null;
+    $entry = $prodCarrByType[$dCarr][$t] ?? null;
     $cnt   = $entry['cnt'] ?? 0;
     if ($cnt > 0) {
       $sum = (float)$entry['sum'];
@@ -1270,6 +1277,10 @@ foreach (array_keys($byDay) as $d) {
     $prodCarrDailySumArr[] = null;
     $prodCarrDailyCntArr[] = null;
   }
+
+}
+
+foreach (array_keys($byDay) as $d) {
 
   foreach ($typesFaz as $t) {
     $entry = $fazCarrByType[$d][$t] ?? null;
@@ -1296,7 +1307,7 @@ foreach (array_keys($byDay) as $d) {
     }
     $seriesLogTipos[$t][] = $val;
   }
-    if ($dailyLogCnt > 0) {
+  if ($dailyLogCnt > 0) {
     $logDailyMeanSeries[] = round($dailyLogSum / $dailyLogCnt, 3);
     $logDailySumArr[] = round($dailyLogSum, 3);
     $logDailyCntArr[] = (int)$dailyLogCnt;
@@ -1946,6 +1957,8 @@ $mediaF19 = $avgOf($series['f19_dia']);
 
   // ===== Dados do PHP =====
   const labels  = <?php echo json_encode($labels, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const labelsProdCarr = <?php echo json_encode($labelsProdCarr, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const labelsProdCarrISO = <?php echo json_encode($labelsProdCarrISO, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const labelsProdDesc = <?php echo json_encode($labelsProdDesc, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const labelsProdDescISO = <?php echo json_encode($labelsProdDescISO, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const S       = <?php echo json_encode($series, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
@@ -2055,6 +2068,8 @@ $mediaF19 = $avgOf($series['f19_dia']);
   const BASE = {
     labels: [...labels],
     labelsISO: [...labelsISO],
+    labelsProdCarr: [...labelsProdCarr],
+    labelsProdCarrISO: [...labelsProdCarrISO],
     labelsProdDesc: [...labelsProdDesc],
     labelsProdDescISO: [...labelsProdDescISO],
     S: JSON.parse(JSON.stringify(S)),
@@ -2723,16 +2738,21 @@ function updateProdRomaneioChart(){
     const keep   = idxRangeByDateISO(BASE.labelsISO,    dFrom, dTo);
     const keepH  = idxRangeByDateISO(BASE.labelsCISO_H, dFrom, dTo);
     const keepO  = idxRangeByDateISO(BASE.labelsCISO_O, dFrom, dTo);
+    const hasProdCarrLabels = (BASE.labelsProdCarrISO || []).length > 0;
     const hasProdDescLabels = (BASE.labelsProdDescISO || []).length > 0;
+    const keepCarr = idxRangeByDateISO(hasProdCarrLabels ? BASE.labelsProdCarrISO : BASE.labelsISO, dFrom, dTo);
     const keepDesc = idxRangeByDateISO(hasProdDescLabels ? BASE.labelsProdDescISO : BASE.labelsISO, dFrom, dTo);
     window._keepIdx  = keep;
     window._keepIdxH = keepH;
     window._keepIdxO = keepO;
+    window._keepIdxCarr = keepCarr;
     window._keepIdxDesc = keepDesc;
 
     const L   = sliceByIdx(BASE.labels,  keep);
     const LCH = sliceByIdx(BASE.labelsC_H, keepH);
     const LCO = sliceByIdx(BASE.labelsC_O, keepO);
+    const LCarr = hasProdCarrLabels ? sliceByIdx(BASE.labelsProdCarr, keepCarr) : L;
+    const LCarrISO = hasProdCarrLabels ? sliceByIdx(BASE.labelsProdCarrISO, keepCarr) : sliceByIdx(BASE.labelsISO, keep);
     const LDesc = hasProdDescLabels ? sliceByIdx(BASE.labelsProdDesc, keepDesc) : L;
     const LDescISO = hasProdDescLabels ? sliceByIdx(BASE.labelsProdDescISO, keepDesc) : sliceByIdx(BASE.labelsISO, keep);
 
@@ -2953,13 +2973,17 @@ if (can) {
 
     // Produção Carregamento — HORAS
     if (CH.prodCarreg){
-      CH.prodCarreg.data.labels = LDesc;
-      const prodCarrByDate = projectTypeSeriesByDate(BASE.prodCarrTipos || {}, BASE.labelsISO || [], LDescISO);
+      CH.prodCarreg.data.labels = LCarr;
+      const prodCarrByDate = projectTypeSeriesByDate(
+        BASE.prodCarrTipos || {},
+        hasProdCarrLabels ? (BASE.labelsProdCarrISO || []) : (BASE.labelsISO || []),
+        LCarrISO
+      );
       const { datasets, meanMap } = buildTypeDatasets(
         BASE.typesProd || [],
         prodCarrByDate,
         null,
-        LDesc,
+        LCarr,
         (t) => colorForType(t, false, false),
         {},
         'Média',
@@ -3648,10 +3672,37 @@ Chart.register(noDataPlugin);
   (function(){
     const el = document.getElementById('chartProdCarreg');
     if (!el) return;
-    const lblCarr = (labelsProdDesc && labelsProdDesc.length) ? labelsProdDesc : labels;
-    const lblCarrISO = (labelsProdDescISO && labelsProdDescISO.length) ? labelsProdDescISO : labelsISO;
-    CH.prodCarreg = new Chart(el, { data:{ labels: lblCarr, datasets:[] }, options:{ ...hoursOpts, plugins:{ ...hoursOpts.plugins, legend:{ position:'bottom', labels:{ boxWidth:12 } } } } });
-    const prodCarrByDate = projectTypeSeriesByDate(BASE.prodCarrTipos || {}, BASE.labelsISO || [], lblCarrISO);
+    const lblCarr = (labelsProdCarr && labelsProdCarr.length) ? labelsProdCarr : labels;
+    const lblCarrISO = (labelsProdCarrISO && labelsProdCarrISO.length) ? labelsProdCarrISO : labelsISO;
+    CH.prodCarreg = new Chart(el, {
+      data:{ labels: lblCarr, datasets:[] },
+      options:{
+        ...hoursOpts,
+        plugins:{ ...hoursOpts.plugins, legend:{ position:'bottom', labels:{ boxWidth:12 } } },
+        scales:{
+          ...hoursOpts.scales,
+          x:{
+            ...(hoursOpts.scales?.x || {}),
+            type:'category',
+            ticks:{
+              ...(hoursOpts.scales?.x?.ticks || {}),
+              autoSkip:false,
+              maxRotation:0,
+              minRotation:0,
+              callback:function(value, idx){
+                const labs = this?.chart?.data?.labels;
+                return (labs && labs[idx] != null) ? labs[idx] : value;
+              }
+            }
+          }
+        }
+      }
+    });
+    const prodCarrByDate = projectTypeSeriesByDate(
+      BASE.prodCarrTipos || {},
+      (labelsProdCarrISO && labelsProdCarrISO.length) ? (BASE.labelsProdCarrISO || []) : (BASE.labelsISO || []),
+      lblCarrISO
+    );
     const { datasets, meanMap } = buildTypeDatasets(
       BASE.typesProd || [],
       prodCarrByDate,
