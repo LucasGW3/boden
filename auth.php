@@ -63,9 +63,10 @@ function auth_login(string $email, string $password): bool {
 }
 
 function auth_logout(): void {
-      if (!empty($_SESSION['users']['email']) && $_SESSION['users']['email'] === 'tv@w3wolbert.com') {
-      return;
-    }
+  $current = auth_user();
+  if (!empty($current['email']) && strtolower($current['email']) === 'tv@w3wolbert.com') {
+    return;
+  }
   $_SESSION = [];
   if (ini_get("session.use_cookies")) {
     $params = session_get_cookie_params();
@@ -112,7 +113,7 @@ if (!function_exists('get_authenticated_user')) {
 
 function require_auth(): void {
   if (!auth_user()) {
-    header('Location: /boden/login.php?next='.urlencode($_SERVER['REQUEST_URI']));
+    header('Location: /login.php?next='.urlencode($_SERVER['REQUEST_URI']));
     exit;
   }
 }
