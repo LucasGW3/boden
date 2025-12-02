@@ -1,9 +1,36 @@
 <?php // auth.php
 if (session_status() === PHP_SESSION_NONE) {
+  // Mantém a sessão viva "para sempre" (janela deslizante de ~5 anos)
+  $sessionLifetime = 60 * 60 * 24 * 365 * 5;
+  ini_set('session.gc_maxlifetime', (string)$sessionLifetime);
+  ini_set('session.cookie_lifetime', (string)$sessionLifetime);
+
+  // Configurações do cookie da sessão (centralizadas aqui)
+  $secure = !empty($_SERVER['HTTPS']);
+  session_set_cookie_params([
+    'lifetime' => $sessionLifetime,
+    'path'     => '/',
+    'domain'   => ini_get('session.cookie_domain') ?: '',
+    'secure'   => $secure,
+    'httponly' => true,
+    'samesite' => 'Lax',
+  ]);
+
   ini_set('session.cookie_httponly', '1');
   ini_set('session.cookie_samesite', 'Lax'); // se for SSO/embeds, ajuste
   if (!empty($_SERVER['HTTPS'])) ini_set('session.cookie_secure', '1');
   session_start();
+
+    // Renova o cookie da sessão a cada requisição para manter a janela sempre ativa
+  $params = session_get_cookie_params();
+  setcookie(session_name(), session_id(), [
+    'expires'  => time() + $sessionLifetime,
+    'path'     => $params['path'] ?? '/',
+    'domain'   => $params['domain'] ?? '',
+    'secure'   => $params['secure'] ?? !empty($_SERVER['HTTPS']),
+    'httponly' => true,
+    'samesite' => $params['samesite'] ?? 'Lax',
+  ]);
 }
 
 require_once __DIR__ . '/db.php'; // sua função pdo()
@@ -63,16 +90,8 @@ function auth_login(string $email, string $password): bool {
 }
 
 function auth_logout(): void {
-  $current = auth_user();
-  if (!empty($current['email']) && strtolower($current['email']) === 'tv@w3wolbert.com') {
-    return;
-  }
-  $_SESSION = [];
-  if (ini_get("session.use_cookies")) {
-    $params = session_get_cookie_params();
-    setcookie(session_name(), '', time()-42000, $params["path"], $params["domain"], $params["secure"], $params["httponly"]);
-  }
-  session_destroy();
+  // Logout desabilitado para manter as sessoes ativas e evitar limpezas involuntarias
+  return;
 }
 
 /**

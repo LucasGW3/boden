@@ -136,7 +136,7 @@ function get_allowed_units_for_user(int $uid): ?array {
 $SECTIONS_BY_ROLE = [
   'comercial' => ['secComercial','secComercialOntem'],
   'logistica' => ['secLogistica'],
-  'qualidade' => ['secQPelada','secQDefeitos','secQUniform'],
+  'qualidade' => ['secQPelada','secQDefeitos','secQUniform','secQPmbVar','secQBulbosVar'],
   'producao'  => ['secProdSacos','secProdCarreg','secProdDesc','secProdParada','secProdAprov','secProdAting','secProdAtingSafra','secProdRomaneio'],
   'fazenda'   => ['secFazCarreg','secFazDesc','secFazPessoas','secFazColhedora','secPie'],
 ];
@@ -149,6 +149,8 @@ $CAP_BY_SECTION = [
   'secQPelada'          => ['view',  'dashboard_qualidade'],
   'secQDefeitos'        => ['view',  'dashboard_qualidade'],
   'secQUniform'         => ['view',  'dashboard_qualidade'],
+  'secQPmbVar'          => ['view',  'dashboard_qualidade'],
+  'secQBulbosVar'       => ['view',  'dashboard_qualidade'],
   'secProdSacos'        => ['view',  'dashboard_producao'],
   'secProdCarreg'       => ['view',  'dashboard_producao'],
   'secProdDesc'         => ['view',  'dashboard_producao'],
@@ -477,6 +479,11 @@ $allTypesProd      = [];
 $allTypesProdDesc  = [];
 $allTypesFaz       = [];
 
+$qPmbByVar     = [];
+$qBulbosByVar  = [];
+$qPmbVarSet    = [];
+$qBulbosVarSet = [];
+
 foreach ($rows as $r) {
   $d = $r['ref_date'];
   $descDay = $r['created_day'] ?? $d;
@@ -485,6 +492,54 @@ foreach ($rows as $r) {
   if (!isset($byDay[$d])) $byDay[$d] = ['override'=>[], 'sum'=>[], 'avg'=>[]];
 
   $payload = json_decode($r['payload_json'] ?? 'null', true) ?: [];
+  $qualSection = is_array($payload['qualidade'] ?? null) ? $payload['qualidade'] : [];
+
+  // ===== Qualidade: PMB por variedade
+  $pmbItems = $qualSection['pmb_variedade'] ?? $qualSection['pmb_por_variedade'] ?? [];
+  if (is_array($pmbItems)) {
+    if (array_keys($pmbItems) !== range(0, count($pmbItems)-1)) $pmbItems = array_values($pmbItems);
+    foreach ($pmbItems as $item) {
+      if (!is_array($item)) continue;
+      $varRaw = $item['variedade'] ?? $item['var'] ?? $item['nome'] ?? null;
+      if (is_array($varRaw)) $varRaw = $varRaw['nome'] ?? $varRaw['label'] ?? reset($varRaw);
+      $variedade = trim((string)$varRaw);
+      if ($variedade === '') $variedade = 'Sem variedade';
+
+      $valRaw = $item['pmb'] ?? $item['valor'] ?? $item['media'] ?? null;
+      if (is_array($valRaw)) $valRaw = $valRaw['valor'] ?? reset($valRaw);
+      $val = parse_money_br($valRaw);
+      if ($val === null || $val <= 0) continue;
+
+      $qPmbVarSet[$variedade] = true;
+      if (!isset($qPmbByVar[$variedade][$d])) $qPmbByVar[$variedade][$d] = ['sum'=>0.0,'cnt'=>0];
+      $qPmbByVar[$variedade][$d]['sum'] += (float)$val;
+      $qPmbByVar[$variedade][$d]['cnt'] += 1;
+    }
+  }
+
+  // ===== Qualidade: Bulbos/saco por variedade
+  $bulbItems = $qualSection['bulbos_saco_variedade'] ?? $qualSection['bulbos_variedade'] ?? $qualSection['bulbos_por_variedade'] ?? [];
+  if (is_array($bulbItems)) {
+    if (array_keys($bulbItems) !== range(0, count($bulbItems)-1)) $bulbItems = array_values($bulbItems);
+    foreach ($bulbItems as $item) {
+      if (!is_array($item)) continue;
+      $varRaw = $item['variedade'] ?? $item['var'] ?? $item['nome'] ?? null;
+      if (is_array($varRaw)) $varRaw = $varRaw['nome'] ?? $varRaw['label'] ?? reset($varRaw);
+      $variedade = trim((string)$varRaw);
+      if ($variedade === '') $variedade = 'Sem variedade';
+
+      $valRaw = $item['bulbos_saco'] ?? $item['bulbos'] ?? $item['qtd'] ?? $item['valor'] ?? null;
+      if (is_array($valRaw)) $valRaw = $valRaw['valor'] ?? reset($valRaw);
+      $val = parse_money_br($valRaw);
+      if ($val === null || $val <= 0) continue;
+
+      $qBulbosVarSet[$variedade] = true;
+      if (!isset($qBulbosByVar[$variedade][$d])) $qBulbosByVar[$variedade][$d] = ['sum'=>0.0,'cnt'=>0];
+      $qBulbosByVar[$variedade][$d]['sum'] += (float)$val;
+      $qBulbosByVar[$variedade][$d]['cnt'] += 1;
+    }
+  }
+
   $prodSection = is_array($payload['producao'] ?? null) ? $payload['producao'] : [];
   $downtimeMin = null;
   if ($prodSection) {
@@ -1198,7 +1253,70 @@ $avgOf = function($arr){
 $f18TotalMean = $avgOf($f18TotalSeries);
 
 /* =============================================================================
- * 10) Métricas resumo (gerais)
+ * 10) Qualidade - PMB e Bulbos/saco por variedade
+ * ========================================================================== */
+$qPmbVarNames = array_keys($qPmbVarSet);
+natcasesort($qPmbVarNames);
+$qPmbVarNames = array_values($qPmbVarNames);
+
+$qBulbosVarNames = array_keys($qBulbosVarSet);
+natcasesort($qBulbosVarNames);
+$qBulbosVarNames = array_values($qBulbosVarNames);
+
+$qPmbSeriesByVar = [];
+$qPmbCountByVar  = [];
+foreach ($qPmbVarNames as $vn) {
+  $serie = []; $cnts = [];
+  foreach ($labelsISO as $d) {
+    $vals = $qPmbByVar[$vn][$d] ?? null;
+    if ($vals && $vals['cnt'] > 0) {
+      $serie[] = round($vals['sum'] / $vals['cnt'], 3);
+      $cnts[] = (float)$vals['cnt'];
+    } else {
+      $serie[] = null;
+      $cnts[] = 0.0;
+    }
+  }
+  $qPmbSeriesByVar[$vn] = $serie;
+  $qPmbCountByVar[$vn]  = $cnts;
+}
+
+$qBulbosSeriesByVar = [];
+$qBulbosCountByVar  = [];
+foreach ($qBulbosVarNames as $vn) {
+  $serie = []; $cnts = [];
+  foreach ($labelsISO as $d) {
+    $vals = $qBulbosByVar[$vn][$d] ?? null;
+    if ($vals && $vals['cnt'] > 0) {
+      $serie[] = round($vals['sum'] / $vals['cnt'], 3);
+      $cnts[] = (float)$vals['cnt'];
+    } else {
+      $serie[] = null;
+      $cnts[] = 0.0;
+    }
+  }
+  $qBulbosSeriesByVar[$vn] = $serie;
+  $qBulbosCountByVar[$vn]  = $cnts;
+}
+
+$allPmbVals = [];
+foreach ($qPmbSeriesByVar as $serie) {
+  foreach ($serie as $v) {
+    if ($v !== null) $allPmbVals[] = $v;
+  }
+}
+$qPmbMean = $avgOf($allPmbVals);
+
+$allBulbosVals = [];
+foreach ($qBulbosSeriesByVar as $serie) {
+  foreach ($serie as $v) {
+    if ($v !== null) $allBulbosVals[] = $v;
+  }
+}
+$qBulbosMean = $avgOf($allBulbosVals);
+
+/* =============================================================================
+ * 11) Métricas resumo (gerais)
  * ========================================================================== */
 $mediaLogLegacy   = $avgOf($series['l5']);
 $mediaPelada= $avgOf($series['q6_dia']);
@@ -1218,7 +1336,7 @@ $rawGlobalCnt = array_sum($fazCarrRawCntPerDay);
 $mediaFazCarr_period = ($rawGlobalCnt>0) ? round($rawGlobalSum/$rawGlobalCnt, 3) : null;
 
 /* =============================================================================
- * 11) Séries por tipo (produção, fazenda e logística)
+ * 12) Séries por tipo (produção, fazenda e logística)
  * ========================================================================== */
 $typesProd = array_keys($allTypesProd); sort($typesProd, SORT_NATURAL|SORT_FLAG_CASE);
 $typesProdDesc = array_keys($allTypesProdDesc); sort($typesProdDesc, SORT_NATURAL|SORT_FLAG_CASE);
@@ -1746,14 +1864,53 @@ $mediaF19 = $avgOf($series['f19_dia']);
           </div>
         </div>
       </div>
+      <div id="modalQPmb" class="modal-backdrop hidden">
+        <div class="modal-compact">
+          <div class="modal-head">
+            <h3>Filtros - PMB por variedade</h3>
+            <button type="button" class="close-btn" data-close-modal="1" aria-label="Fechar">&times;</button>
+          </div>
+          <?php if (!empty($qPmbVarNames)): ?>
+          <div class="mb-3">
+            <p class="text-[11px] uppercase tracking-wide text-brand-muted">Variedades</p>
+            <div id="qPmbVarPicker" class="mt-2 flex flex-wrap gap-2 text-xs"></div>
+          </div>
+          <?php else: ?>
+          <p class="text-sm text-brand-muted">Sem variedades registradas para o per�odo.</p>
+          <?php endif; ?>
+          <div class="footer">
+            <button type="button" class="px-3 py-1.5 text-sm rounded-lg border border-brand-line text-brand-text hover:bg-brand-surface-strong" data-close-modal="1">Fechar</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="modalQBulbos" class="modal-backdrop hidden">
+        <div class="modal-compact">
+          <div class="modal-head">
+            <h3>Filtros - Nº Bulbos/saco por variedade</h3>
+            <button type="button" class="close-btn" data-close-modal="1" aria-label="Fechar">&times;</button>
+          </div>
+          <?php if (!empty($qBulbosVarNames)): ?>
+          <div class="mb-3">
+            <p class="text-[11px] uppercase tracking-wide text-brand-muted">Variedades</p>
+            <div id="qBulbosVarPicker" class="mt-2 flex flex-wrap gap-2 text-xs"></div>
+          </div>
+          <?php else: ?>
+          <p class="text-sm text-brand-muted">Sem variedades registradas para o per�odo.</p>
+          <?php endif; ?>
+          <div class="footer">
+            <button type="button" class="px-3 py-1.5 text-sm rounded-lg border border-brand-line text-brand-text hover:bg-brand-surface-strong" data-close-modal="1">Fechar</button>
+          </div>
+        </div>
+      </div>
+
       <?php if (in_array('secLogistica', $allowedSections, true)): ?>
       <section id="secLogistica" class="card rounded-xl2 bg-brand-surface p-5">
-        <h2 class="font-semibold mb-1">Logística • Tempo de transporte (h)</h2>
-        <p id="log-meta" class="text-xs text-brand-muted mb-3">—</p>
+        <h2 class="font-semibold mb-1">Log�stica � Tempo de transporte (h)</h2>
+        <p id="log-meta" class="text-xs text-brand-muted mb-3">-</p>
         <canvas id="chartLogistica"></canvas>
       </section>
       <?php endif; ?>
-
       <?php if (in_array('secQPelada', $allowedSections, true)): ?>
       <section id="secQPelada" class="card rounded-xl2 bg-brand-surface p-5">
         <h2 class="font-semibold mb-1">Qualidade • Cebola Pelada (%)</h2>
@@ -1775,6 +1932,38 @@ $mediaF19 = $avgOf($series['f19_dia']);
         <h2 class="font-semibold mb-1">Qualidade • Uniformidade (%)</h2>
         <p id="q-meta-uniform" class="text-xs text-brand-muted mb-3">—</p>
         <canvas id="chartQUniform"></canvas>
+      </section>
+      <?php endif; ?>
+
+      <?php if (in_array('secQPmbVar', $allowedSections, true)): ?>
+      <section id="secQPmbVar" class="card rounded-xl2 bg-brand-surface p-5">
+        <div class="flex items-start justify-between gap-2 mb-1">
+          <div>
+            <h2 class="font-semibold">Qualidade • PMB por variedade</h2>
+            <p id="q-pmb-meta" class="text-xs text-brand-muted">-</p>
+          </div>
+          <button id="btnQPmbFilters" type="button" class="inline-flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border border-brand-line bg-white text-brand-text hover:bg-brand-surface-strong shadow-sm transition">
+            <span aria-hidden="true" class="text-sm leading-none">&equiv;</span>
+            <span class="font-semibold">Filtros</span>
+          </button>
+        </div>
+        <canvas id="chartQPmbVar"></canvas>
+      </section>
+      <?php endif; ?>
+
+      <?php if (in_array('secQBulbosVar', $allowedSections, true)): ?>
+      <section id="secQBulbosVar" class="card rounded-xl2 bg-brand-surface p-5">
+        <div class="flex items-start justify-between gap-2 mb-1">
+          <div>
+            <h2 class="font-semibold">Qualidade • Nº Bulbos/saco por variedade</h2>
+            <p id="q-bulbos-meta" class="text-xs text-brand-muted">-</p>
+          </div>
+          <button id="btnQBulbosFilters" type="button" class="inline-flex items-center gap-2 text-xs px-3 py-1.5 rounded-lg border border-brand-line bg-white text-brand-text hover:bg-brand-surface-strong shadow-sm transition">
+            <span aria-hidden="true" class="text-sm leading-none">&equiv;</span>
+            <span class="font-semibold">Filtros</span>
+          </button>
+        </div>
+        <canvas id="chartQBulbosVar"></canvas>
       </section>
       <?php endif; ?>
 
@@ -1999,6 +2188,16 @@ $mediaF19 = $avgOf($series['f19_dia']);
   const f18TotalSeries  = <?php echo json_encode($f18TotalSeries, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
   const f18TotalMean    = <?php echo json_encode($f18TotalMean, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
 
+  // Qualidade por variedade
+  const qPmbVarNames       = <?php echo json_encode($qPmbVarNames, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const qPmbSeriesByVar    = <?php echo json_encode($qPmbSeriesByVar, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const qPmbCountByVar     = <?php echo json_encode($qPmbCountByVar, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const qPmbMean           = <?php echo json_encode($qPmbMean, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const qBulbosVarNames    = <?php echo json_encode($qBulbosVarNames, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const qBulbosSeriesByVar = <?php echo json_encode($qBulbosSeriesByVar, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const qBulbosCountByVar  = <?php echo json_encode($qBulbosCountByVar, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+  const qBulbosMean        = <?php echo json_encode($qBulbosMean, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>;
+
   // NOVO: médias gerais (minutos)
   const mediaDesc  = <?php echo json_encode($mediaDesc, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>; // minutos
   const mediaParada = <?php echo json_encode($mediaParada, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>; // minutos
@@ -2149,6 +2348,15 @@ $mediaF19 = $avgOf($series['f19_dia']);
     metaSeriesByDay: [...metaSeriesByDay],
     realSeriesByDay: [...realSeriesByDay],
 
+    qPmbVarNames: [...qPmbVarNames],
+    qPmbSeriesByVar: JSON.parse(JSON.stringify(qPmbSeriesByVar)),
+    qPmbCountByVar: JSON.parse(JSON.stringify(qPmbCountByVar)),
+    qPmbMean: qPmbMean,
+    qBulbosVarNames: [...qBulbosVarNames],
+    qBulbosSeriesByVar: JSON.parse(JSON.stringify(qBulbosSeriesByVar)),
+    qBulbosCountByVar: JSON.parse(JSON.stringify(qBulbosCountByVar)),
+    qBulbosMean: qBulbosMean,
+
     // F18
     f18VarNames: [...f18VarNames],
     f18SeriesByVar: JSON.parse(JSON.stringify(f18SeriesByVar)),
@@ -2183,6 +2391,8 @@ $mediaF19 = $avgOf($series['f19_dia']);
     {id:'secQPelada',        label:'Cebola Pelada (%)',              icon:ico.qualidade, role:'qualidade'},
     {id:'secQDefeitos',      label:'Defeitos (%)',                   icon:ico.qualidade, role:'qualidade'},
     {id:'secQUniform',       label:'Uniformidade (%)',               icon:ico.qualidade, role:'qualidade'},
+    {id:'secQPmbVar',        label:'PMB por variedade',              icon:ico.qualidade, role:'qualidade'},
+    {id:'secQBulbosVar',     label:'Nº bulbos/saco por variedade',   icon:ico.qualidade, role:'qualidade'},
     {id:'secProdSacos',      label:'Sacos & por colaborador',        icon:ico.producao,  role:'producao'},
     {id:'secProdRomaneio',   label:'Romaneio por caixa',              icon:ico.producao,  role:'producao'},
     {id:'secProdAting',      label:'Meta × Sacos Beneficiados/Dia', icon:ico.producao,  role:'producao' },
@@ -2410,6 +2620,8 @@ $mediaF19 = $avgOf($series['f19_dia']);
   setupSimpleModal('btnComercialHojeFilters', 'modalComercialHoje');
   setupSimpleModal('btnComercialOntemFilters', 'modalComercialOntem');
   setupSimpleModal('btnProdRomFilters', 'modalProdRom');
+  setupSimpleModal('btnQPmbFilters', 'modalQPmb');
+  setupSimpleModal('btnQBulbosFilters', 'modalQBulbos');
 
   // Inclui sec=... no submit do cabeçalho
   document.querySelector('form[method="GET"]')?.addEventListener('submit',()=>{
@@ -2587,6 +2799,34 @@ function buildDailyMeanLine(seriesMap, countMap, selectedBoxes, len, keepIdx){
     periodMean: weightedMean(perDay, perDayWeights),
   };
 }
+function combineVarSeries(seriesByVar, countByVar, selectedVars, len){
+  const vars = (selectedVars && selectedVars.length)
+    ? selectedVars
+    : Object.keys(seriesByVar || {});
+  const sum = new Array(len).fill(0);
+  const weights = new Array(len).fill(0);
+
+  vars.forEach((vn) => {
+    const serie = seriesByVar?.[vn] || [];
+    const counts = countByVar?.[vn] || [];
+    for (let i = 0; i < len; i++){
+      const val = serie[i];
+      if (val == null || Number.isNaN(val)) continue;
+      const numVal = Number(val);
+      if (Number.isNaN(numVal)) continue;
+      const weightRaw = counts[i];
+      const weight = Number.isNaN(Number(weightRaw)) ? 1 : Number(weightRaw);
+      if (weight <= 0) continue;
+      sum[i] += numVal * weight;
+      weights[i] += weight;
+    }
+  });
+
+  return {
+    series: sum.map((s, i) => weights[i] ? (s / weights[i]) : null),
+    weights,
+  };
+}
 function aggregateVarietySeries(periodKey, selectedVarieties){
   const allVarieties = BASE.comVarietyNames || [];
   const baseSeries = (periodKey === 'H') ? BASE.comHojeBoxSeries : BASE.comOntemBoxSeries;
@@ -2697,6 +2937,12 @@ function isAllNull(arr){
 function sumNumbers(arr){
   return (arr || []).reduce((s, v) => s + ((v != null && !Number.isNaN(Number(v))) ? Number(v) : 0), 0);
 }
+function setMetaNumber(elId, val, unit = '', digits = { minimumFractionDigits: 2, maximumFractionDigits: 3 }){
+  const el = document.getElementById(elId);
+  if (!el) return;
+  if (val==null || isNaN(val)) { el.textContent = '-'; return; }
+  el.textContent = `• Média no período: ${Number(val).toLocaleString('pt-BR', digits)}${unit ? ` ${unit}` : ''}`;
+}
 
 function setProdMetaSummary(realSeries, metaSeries){
   const el = document.getElementById('prod-ating-meta');
@@ -2738,6 +2984,64 @@ function updateProdRomaneioChart(){
     dataset.borderColor = colorForRomaneioBox(boxKey);
   });
   CH.prodRomaneio.update();
+}
+
+function updateQPmbChart(){
+  if (!CH.qPmbVar) return;
+  const keep = (window._keepIdx && window._keepIdx.length) ? window._keepIdx : BASE.labels.map((_,i)=>i);
+  const labelsF = sliceByIdx(BASE.labels, keep);
+  const varNames = BASE.qPmbVarNames || [];
+  const sel = (window._qPmbVarSel && window._qPmbVarSel.length) ? window._qPmbVarSel : varNames;
+  const selSet = new Set(sel.length ? sel : varNames);
+
+  CH.qPmbVar.data.labels = labelsF;
+  varNames.forEach((vn, idx) => {
+    const dataset = CH.qPmbVar.data.datasets?.[idx];
+    if (!dataset) return;
+    dataset.data = sliceByIdx(BASE.qPmbSeriesByVar?.[vn] || [], keep);
+    dataset.hidden = !selSet.has(vn);
+    dataset.label = vn;
+    dataset.borderColor = colorForVar(vn);
+  });
+
+  const { series, weights } = combineVarSeries(BASE.qPmbSeriesByVar, BASE.qPmbCountByVar, Array.from(selSet), BASE.labels.length);
+  const meanDataset = CH.qPmbVar.data.datasets[varNames.length];
+  if (meanDataset) {
+    meanDataset.data = sliceByIdx(series, keep);
+    meanDataset.hidden = false;
+  }
+  CH.qPmbVar.update();
+  const meanVal = weightedMean(sliceByIdx(series, keep), sliceByIdx(weights, keep));
+  setMetaNumber('q-pmb-meta', meanVal, 'kg');
+}
+
+function updateQBulbosChart(){
+  if (!CH.qBulbosVar) return;
+  const keep = (window._keepIdx && window._keepIdx.length) ? window._keepIdx : BASE.labels.map((_,i)=>i);
+  const labelsF = sliceByIdx(BASE.labels, keep);
+  const varNames = BASE.qBulbosVarNames || [];
+  const sel = (window._qBulbosVarSel && window._qBulbosVarSel.length) ? window._qBulbosVarSel : varNames;
+  const selSet = new Set(sel.length ? sel : varNames);
+
+  CH.qBulbosVar.data.labels = labelsF;
+  varNames.forEach((vn, idx) => {
+    const dataset = CH.qBulbosVar.data.datasets?.[idx];
+    if (!dataset) return;
+    dataset.data = sliceByIdx(BASE.qBulbosSeriesByVar?.[vn] || [], keep);
+    dataset.hidden = !selSet.has(vn);
+    dataset.label = vn;
+    dataset.borderColor = colorForVar(vn);
+  });
+
+  const { series, weights } = combineVarSeries(BASE.qBulbosSeriesByVar, BASE.qBulbosCountByVar, Array.from(selSet), BASE.labels.length);
+  const meanDataset = CH.qBulbosVar.data.datasets[varNames.length];
+  if (meanDataset) {
+    meanDataset.data = sliceByIdx(series, keep);
+    meanDataset.hidden = false;
+  }
+  CH.qBulbosVar.update();
+  const meanVal = weightedMean(sliceByIdx(series, keep), sliceByIdx(weights, keep));
+  setMetaNumber('q-bulbos-meta', meanVal, 'bulbos/saco', { minimumFractionDigits: 0, maximumFractionDigits: 1 });
 }
 
   function applyDateFilterClient(dFrom, dTo){
@@ -2965,6 +3269,13 @@ if (can) {
     }
 
     // Produção Sacos
+    if (CH.qPmbVar){
+      updateQPmbChart();
+    }
+    if (CH.qBulbosVar){
+      updateQBulbosChart();
+    }
+
     if (CH.prodSacos){
       CH.prodSacos.data.labels = L;
       CH.prodSacos.data.datasets[0].data = Sfil.p16_dia;
@@ -3271,6 +3582,11 @@ Chart.register(noDataPlugin);
   };
 
   const typePalette = ['#0072B2','#E69F00','#D55E00','#CC79A7','#56B4E9','#009E73','#F0E442','#000000','#8A2BE2','#FF7F50','#3CB371','#DA70D6'];
+  const VAR_PALETTE_NAMES = Array.from(new Set([
+    ...(BASE.qPmbVarNames || []),
+    ...(BASE.qBulbosVarNames || []),
+    ...(BASE.f18VarNames || []),
+  ]));
   const colorForType = (name, isFaz=false, isDesc=false) => {
     const baseList = isFaz ? typesFaz : (isDesc ? typesProdDesc : typesProd);
     const idx = baseList.indexOf(name);
@@ -3281,7 +3597,7 @@ Chart.register(noDataPlugin);
     return typePalette[Math.max(0, idx) % typePalette.length];
   };
   const colorForVar = (name) => {
-    const idx = (BASE.f18VarNames || []).indexOf(name);
+    const idx = VAR_PALETTE_NAMES.indexOf(name);
     return typePalette[Math.max(0, idx) % typePalette.length];
   };
     const colorForCaixa = (name) => {
@@ -3560,6 +3876,73 @@ Chart.register(noDataPlugin);
     setMetaPercent('q-meta-uniform', <?php echo json_encode($mediaUniform, JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES); ?>);
   })();
 
+  (function(){
+    const el = document.getElementById('chartQPmbVar');
+    if (!el) return;
+
+    const varNames = BASE.qPmbVarNames || [];
+    const datasets = varNames.map((vn) => mkLine(vn, new Array(labels.length).fill(null), colorForVar(vn), 'y', { borderWidth:3 }));
+    datasets.push(mkLine('Média selecionada', new Array(labels.length).fill(null), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }));
+
+    CH.qPmbVar = new Chart(el, {
+      data:{ labels, datasets },
+      options:{
+        ...baseOpts(true),
+        plugins:{
+          ...baseOpts(true).plugins,
+          tooltip:{ callbacks:{ label:(ctx)=>{
+            const v = ctx.parsed.y;
+            const txt = (v==null?'-':Number(v).toLocaleString('pt-BR',{ minimumFractionDigits:2, maximumFractionDigits:3 }));
+            return `${ctx.dataset.label}: ${txt} kg`;
+          }}}
+        },
+        scales:{ y:{ beginAtZero:true, title:{ display:true, text:'kg' } }, x:{ ticks:{ color: hexToRgba(THEME.text,.7) } } }
+      }
+    });
+
+    window._qPmbVarSel = [...varNames];
+    if (document.getElementById('qPmbVarPicker') && varNames.length){
+      buildVarPicker('qPmbVarPicker', varNames, varNames, (sel)=>{
+        window._qPmbVarSel = (sel && sel.length) ? sel : [...varNames];
+        updateQPmbChart();
+      });
+    }
+    updateQPmbChart();
+  })();
+
+  (function(){
+    const el = document.getElementById('chartQBulbosVar');
+    if (!el) return;
+
+    const varNames = BASE.qBulbosVarNames || [];
+    const datasets = varNames.map((vn) => mkLine(vn, new Array(labels.length).fill(null), colorForVar(vn), 'y', { borderWidth:3 }));
+    datasets.push(mkLine('Média selecionada', new Array(labels.length).fill(null), THEME.g1, 'y', { pointRadius:0, borderDash:[6,4], borderWidth:3 }));
+
+    CH.qBulbosVar = new Chart(el, {
+      data:{ labels, datasets },
+      options:{
+        ...baseOpts(true),
+        plugins:{
+          ...baseOpts(true).plugins,
+          tooltip:{ callbacks:{ label:(ctx)=>{
+            const v = ctx.parsed.y;
+            const txt = (v==null?'-':Number(v).toLocaleString('pt-BR',{ minimumFractionDigits:0, maximumFractionDigits:1 }));
+            return `${ctx.dataset.label}: ${txt} bulbos/saco`;
+          }}}
+        },
+        scales:{ y:{ beginAtZero:true, title:{ display:true, text:'Bulbos/saco' } }, x:{ ticks:{ color: hexToRgba(THEME.text,.7) } } }
+      }
+    });
+
+    window._qBulbosVarSel = [...varNames];
+    if (document.getElementById('qBulbosVarPicker') && varNames.length){
+      buildVarPicker('qBulbosVarPicker', varNames, varNames, (sel)=>{
+        window._qBulbosVarSel = (sel && sel.length) ? sel : [...varNames];
+        updateQBulbosChart();
+      });
+    }
+    updateQBulbosChart();
+  })();
   // ===== Produção: Sacos
   (function(){
     const el = document.getElementById('chartProdSacos');
