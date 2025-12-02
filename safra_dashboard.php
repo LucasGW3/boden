@@ -1876,7 +1876,7 @@ $mediaF19 = $avgOf($series['f19_dia']);
             <div id="qPmbVarPicker" class="mt-2 flex flex-wrap gap-2 text-xs"></div>
           </div>
           <?php else: ?>
-          <p class="text-sm text-brand-muted">Sem variedades registradas para o per�odo.</p>
+          <p class="text-sm text-brand-muted">Sem variedades registradas para o período.</p>
           <?php endif; ?>
           <div class="footer">
             <button type="button" class="px-3 py-1.5 text-sm rounded-lg border border-brand-line text-brand-text hover:bg-brand-surface-strong" data-close-modal="1">Fechar</button>
@@ -1896,7 +1896,7 @@ $mediaF19 = $avgOf($series['f19_dia']);
             <div id="qBulbosVarPicker" class="mt-2 flex flex-wrap gap-2 text-xs"></div>
           </div>
           <?php else: ?>
-          <p class="text-sm text-brand-muted">Sem variedades registradas para o per�odo.</p>
+          <p class="text-sm text-brand-muted">Sem variedades registradas para o período.</p>
           <?php endif; ?>
           <div class="footer">
             <button type="button" class="px-3 py-1.5 text-sm rounded-lg border border-brand-line text-brand-text hover:bg-brand-surface-strong" data-close-modal="1">Fechar</button>
@@ -1906,7 +1906,7 @@ $mediaF19 = $avgOf($series['f19_dia']);
 
       <?php if (in_array('secLogistica', $allowedSections, true)): ?>
       <section id="secLogistica" class="card rounded-xl2 bg-brand-surface p-5">
-        <h2 class="font-semibold mb-1">Log�stica � Tempo de transporte (h)</h2>
+        <h2 class="font-semibold mb-1">Logística • Tempo de transporte (h)</h2>
         <p id="log-meta" class="text-xs text-brand-muted mb-3">-</p>
         <canvas id="chartLogistica"></canvas>
       </section>
